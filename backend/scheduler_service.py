@@ -1,6 +1,8 @@
 from datetime import datetime, timezone, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 
+from db_service import mark_reminder_notified
+
 scheduler = BackgroundScheduler()
 
 scheduler_state = {
@@ -57,6 +59,9 @@ def check_manual_reminders():
 
     for telegram_id, user_reminders in reminders.items():
         for match in user_reminders:
+            if match.get("notified"):
+                continue
+
             if not should_notify(match):
                 continue
 
@@ -73,6 +78,8 @@ def check_manual_reminders():
             try:
                 import asyncio
                 asyncio.run(send_telegram_message(bot_app, telegram_id, text))
+                mark_reminder_notified(telegram_id, match["id"])
+                match["notified"] = True
                 sent_notifications.add(notification_key)
                 print(f"Manual reminder sent to {telegram_id} for match {match['id']}")
             except Exception as error:
