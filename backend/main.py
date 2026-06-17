@@ -15,9 +15,11 @@ from db_service import (
     save_favorite_team_to_db,
     get_favorite_teams_from_db,
     get_all_favorite_teams_from_db,
+    delete_favorite_team_from_db,
     save_reminder_to_db,
     get_reminders_from_db,
     get_all_reminders_from_db,
+    delete_reminder_from_db,
 )
 
 from telegram import (
@@ -184,6 +186,19 @@ def get_favorite_teams(telegram_id: int):
     }
 
 
+@api.delete("/favorite-team")
+def delete_favorite_team(data: FavoriteTeamData):
+    deleted = delete_favorite_team_from_db(data.telegram_id, data.team_id)
+    favorite_teams[data.telegram_id] = get_favorite_teams_from_db(data.telegram_id)
+
+    return {
+        "success": True,
+        "deleted": deleted,
+        "telegram_id": data.telegram_id,
+        "favorite_teams": favorite_teams[data.telegram_id],
+    }
+
+
 @api.post("/reminder")
 def save_reminder(data: ReminderData):
     matches = get_real_matches(status="all")
@@ -223,19 +238,32 @@ def get_reminders(telegram_id: int):
     }
 
 
+@api.delete("/reminder")
+def delete_reminder(data: ReminderData):
+    deleted = delete_reminder_from_db(data.telegram_id, data.match_id)
+    reminders[data.telegram_id] = get_reminders_from_db(data.telegram_id)
+
+    return {
+        "success": True,
+        "deleted": deleted,
+        "telegram_id": data.telegram_id,
+        "reminders": reminders[data.telegram_id],
+    }
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton(
-                text="⚽ Open MatchPulse App",
+                text="âš½ Open MatchPulse App",
                 web_app=WebAppInfo(url=WEBAPP_URL),
             )
         ]
     ]
 
     await update.message.reply_text(
-        "به MatchPulse خوش اومدی ⚽\n\n"
-        "برای باز کردن اپ، دکمه زیر رو بزن:",
+        "Ø¨Ù‡ MatchPulse Ø®ÙˆØ´ Ø§ÙˆÙ…Ø¯ÛŒ âš½\n\n"
+        "Ø¨Ø±Ø§ÛŒ Ø¨Ø§Ø² Ú©Ø±Ø¯Ù† Ø§Ù¾ØŒ Ø¯Ú©Ù…Ù‡ Ø²ÛŒØ± Ø±Ùˆ Ø¨Ø²Ù†:",
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
 
@@ -250,8 +278,8 @@ async def test_notification(telegram_id: int):
         await bot_app.bot.send_message(
             chat_id=telegram_id,
             text=(
-                "🔔 پیام تست MatchPulse\n\n"
-                "اگر این پیام را می‌بینی، ارسال اعلان تلگرام درست کار می‌کند."
+                "ðŸ”” Ù¾ÛŒØ§Ù… ØªØ³Øª MatchPulse\n\n"
+                "Ø§Ú¯Ø± Ø§ÛŒÙ† Ù¾ÛŒØ§Ù… Ø±Ø§ Ù…ÛŒâ€ŒØ¨ÛŒÙ†ÛŒØŒ Ø§Ø±Ø³Ø§Ù„ Ø§Ø¹Ù„Ø§Ù† ØªÙ„Ú¯Ø±Ø§Ù… Ø¯Ø±Ø³Øª Ú©Ø§Ø± Ù…ÛŒâ€ŒÚ©Ù†Ø¯."
             ),
         )
 
@@ -288,14 +316,14 @@ async def test_match_reminder(telegram_id: int, match_id: int):
         }
 
     text = (
-        "🔔 یادآوری مسابقه MatchPulse\n\n"
-        f"{selected_match.get('home_flag', '⚽')} {selected_match.get('home_en')} "
+        "ðŸ”” ÛŒØ§Ø¯Ø¢ÙˆØ±ÛŒ Ù…Ø³Ø§Ø¨Ù‚Ù‡ MatchPulse\n\n"
+        f"{selected_match.get('home_flag', 'âš½')} {selected_match.get('home_en')} "
         f"vs "
-        f"{selected_match.get('away_flag', '⚽')} {selected_match.get('away_en')}\n\n"
-        f"🕒 {selected_match.get('date_iran')} - {selected_match.get('time_iran')}\n"
-        f"🏟 {selected_match.get('stadium')}\n"
-        f"📍 {selected_match.get('city')}\n\n"
-        "این یک پیام تست برای اعلان مسابقه است."
+        f"{selected_match.get('away_flag', 'âš½')} {selected_match.get('away_en')}\n\n"
+        f"ðŸ•’ {selected_match.get('date_iran')} - {selected_match.get('time_iran')}\n"
+        f"ðŸŸ {selected_match.get('stadium')}\n"
+        f"ðŸ“ {selected_match.get('city')}\n\n"
+        "Ø§ÛŒÙ† ÛŒÚ© Ù¾ÛŒØ§Ù… ØªØ³Øª Ø¨Ø±Ø§ÛŒ Ø§Ø¹Ù„Ø§Ù† Ù…Ø³Ø§Ø¨Ù‚Ù‡ Ø§Ø³Øª."
     )
 
     try:

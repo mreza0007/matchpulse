@@ -157,6 +157,26 @@ def get_favorite_teams_from_db(telegram_id):
     return [json.loads(row[0]) for row in rows]
 
 
+def delete_favorite_team_from_db(telegram_id, team_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        DELETE FROM favorite_teams
+        WHERE telegram_id = ? AND team_id = ?
+        """,
+        (telegram_id, team_id),
+    )
+
+    deleted_count = cursor.rowcount
+
+    conn.commit()
+    conn.close()
+
+    return deleted_count > 0
+
+
 def save_reminder_to_db(telegram_id, match):
     conn = get_connection()
     cursor = conn.cursor()
@@ -206,6 +226,26 @@ def get_reminders_from_db(telegram_id):
         reminders.append(match)
 
     return reminders
+
+
+def delete_reminder_from_db(telegram_id, match_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        DELETE FROM reminders
+        WHERE telegram_id = ? AND match_id = ?
+        """,
+        (telegram_id, match_id),
+    )
+
+    deleted_count = cursor.rowcount
+
+    conn.commit()
+    conn.close()
+
+    return deleted_count > 0
 
 
 def get_all_reminders_from_db():
@@ -280,4 +320,3 @@ def get_all_favorite_teams_from_db():
         result[telegram_id].append(team)
 
     return result 
-    
