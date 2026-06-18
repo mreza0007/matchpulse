@@ -255,15 +255,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton(
-                text="âš½ Open MatchPulse App",
+                text="⚽ Open MatchPulse App",
                 web_app=WebAppInfo(url=WEBAPP_URL),
             )
         ]
     ]
 
     await update.message.reply_text(
-        "Ø¨Ù‡ MatchPulse Ø®ÙˆØ´ Ø§ÙˆÙ…Ø¯ÛŒ âš½\n\n"
-        "Ø¨Ø±Ø§ÛŒ Ø¨Ø§Ø² Ú©Ø±Ø¯Ù† Ø§Ù¾ØŒ Ø¯Ú©Ù…Ù‡ Ø²ÛŒØ± Ø±Ùˆ Ø¨Ø²Ù†:",
+        "به MatchPulse خوش اومدی ⚽\n\n"
+        "برای باز کردن اپ، دکمه زیر رو بزن:",
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
 
@@ -278,8 +278,8 @@ async def test_notification(telegram_id: int):
         await bot_app.bot.send_message(
             chat_id=telegram_id,
             text=(
-                "ðŸ”” Ù¾ÛŒØ§Ù… ØªØ³Øª MatchPulse\n\n"
-                "Ø§Ú¯Ø± Ø§ÛŒÙ† Ù¾ÛŒØ§Ù… Ø±Ø§ Ù…ÛŒâ€ŒØ¨ÛŒÙ†ÛŒØŒ Ø§Ø±Ø³Ø§Ù„ Ø§Ø¹Ù„Ø§Ù† ØªÙ„Ú¯Ø±Ø§Ù… Ø¯Ø±Ø³Øª Ú©Ø§Ø± Ù…ÛŒâ€ŒÚ©Ù†Ø¯."
+                "🔔 پیام تست MatchPulse\n\n"
+                "اگر این پیام را می‌بینی، ارسال اعلان تلگرام درست کار می‌کند."
             ),
         )
 
@@ -316,14 +316,14 @@ async def test_match_reminder(telegram_id: int, match_id: int):
         }
 
     text = (
-        "ðŸ”” ÛŒØ§Ø¯Ø¢ÙˆØ±ÛŒ Ù…Ø³Ø§Ø¨Ù‚Ù‡ MatchPulse\n\n"
-        f"{selected_match.get('home_flag', 'âš½')} {selected_match.get('home_en')} "
+        "🔔 یادآوری مسابقه MatchPulse\n\n"
+        f"{selected_match.get('home_flag', '⚽')} {selected_match.get('home_en')} "
         f"vs "
-        f"{selected_match.get('away_flag', 'âš½')} {selected_match.get('away_en')}\n\n"
-        f"ðŸ•’ {selected_match.get('date_iran')} - {selected_match.get('time_iran')}\n"
-        f"ðŸŸ {selected_match.get('stadium')}\n"
-        f"ðŸ“ {selected_match.get('city')}\n\n"
-        "Ø§ÛŒÙ† ÛŒÚ© Ù¾ÛŒØ§Ù… ØªØ³Øª Ø¨Ø±Ø§ÛŒ Ø§Ø¹Ù„Ø§Ù† Ù…Ø³Ø§Ø¨Ù‚Ù‡ Ø§Ø³Øª."
+        f"{selected_match.get('away_flag', '⚽')} {selected_match.get('away_en')}\n\n"
+        f"🕒 {selected_match.get('date_iran')} - {selected_match.get('time_iran')}\n"
+        f"🏟 {selected_match.get('stadium')}\n"
+        f"📍 {selected_match.get('city')}\n\n"
+        "این یک پیام تست برای اعلان مسابقه است."
     )
 
     try:

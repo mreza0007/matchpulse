@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import "./App.css";
 
-const API_BASE_URL = "http://127.0.0.1:8000";
+const API_BASE_URL = import.meta.env.VITE_API_URL;
 
 const translations = {
   fa: {
@@ -40,6 +40,7 @@ const translations = {
     stage: "مرحله",
     city: "شهر",
     stadium: "ورزشگاه",
+    remove: "حذف",
   },
   en: {
     dir: "ltr",
@@ -77,6 +78,7 @@ const translations = {
     stage: "Stage",
     city: "City",
     stadium: "Stadium",
+    remove: "Remove",
   },
 };
 
@@ -272,6 +274,46 @@ function App() {
       .catch((error) => console.error("Failed to save reminder:", error));
   };
 
+  const removeFavoriteTeam = (teamId) => {
+    if (!telegramUser) return;
+
+    fetch(`${API_BASE_URL}/favorite-team`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        telegram_id: telegramUser.id,
+        team_id: teamId,
+      }),
+    })
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.success) {
+          setFavoriteTeams(data.favorite_teams || []);
+        }
+      })
+      .catch((error) => console.error("Failed to remove favorite team:", error));
+  };
+
+  const removeReminder = (matchId) => {
+    if (!telegramUser) return;
+
+    fetch(`${API_BASE_URL}/reminder`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        telegram_id: telegramUser.id,
+        match_id: matchId,
+      }),
+    })
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.success) {
+          setReminders(data.reminders || []);
+        }
+      })
+      .catch((error) => console.error("Failed to remove reminder:", error));
+  };
+
   const profileName = telegramUser
     ? `${telegramUser.first_name || ""} ${telegramUser.last_name || ""}`.trim()
     : t.profileTitle;
@@ -458,6 +500,9 @@ function App() {
             {favoriteTeams.map((team) => (
               <p key={team.id}>
                 {team.emoji} {lang === "fa" ? team.name_fa : team.name_en}
+                <button className="remind-btn" onClick={() => removeFavoriteTeam(team.id)}>
+                  {t.remove}
+                </button>
               </p>
             ))}
 
@@ -467,6 +512,9 @@ function App() {
               <p key={match.id}>
                 {match.home_flag} {match.home_en} {t.vs} {match.away_flag}{" "}
                 {match.away_en} - {match.date_iran} {match.time_iran}
+                <button className="remind-btn" onClick={() => removeReminder(match.id)}>
+                  {t.remove}
+                </button>
               </p>
             ))}
           </article>
