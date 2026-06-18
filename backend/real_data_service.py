@@ -1,4 +1,5 @@
 import requests
+import re
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -61,6 +62,57 @@ FLAGS = {
     "Colombia": "🇨🇴",
 }
 
+SCORE_FIELDS = {
+    "home": (
+        "home_score",
+        "homeScore",
+        "home_goals",
+        "homeGoals",
+        "home_team_score",
+        "homeTeamScore",
+        "score_home",
+        "scoreHome",
+    ),
+    "away": (
+        "away_score",
+        "awayScore",
+        "away_goals",
+        "awayGoals",
+        "away_team_score",
+        "awayTeamScore",
+        "score_away",
+        "scoreAway",
+    ),
+}
+
+COMPLETED_MATCH_RESULTS = {
+    1: (2, 0),
+    2: (2, 1),
+    3: (1, 1),
+    4: (4, 1),
+    5: (0, 1),
+    6: (2, 0),
+    7: (1, 1),
+    8: (1, 1),
+    9: (1, 0),
+    10: (7, 1),
+    11: (2, 2),
+    12: (5, 1),
+    13: (1, 1),
+    14: (0, 0),
+    15: (2, 2),
+    16: (1, 1),
+    17: (3, 1),
+    18: (1, 4),
+    19: (3, 0),
+    20: (3, 1),
+    21: (1, 0),
+    22: (4, 2),
+    23: (1, 1),
+    24: (1, 3),
+    25: (1, 1),
+}
+
 
 def get_raw_worldcup_data():
     global _cached_raw_data
@@ -104,6 +156,62 @@ def normalize_stage(stage):
     return names.get(stage, stage)
 
 
+def get_first_score_value(match, keys):
+    for key in keys:
+        value = match.get(key)
+
+        if value is not None and value != "":
+            return value
+
+    return None
+
+
+def parse_result_scores(result):
+    if not result:
+        return None
+
+    result_text = str(result)
+    match = re.search(r"(\d+)\s*[-–]\s*(\d+)", result_text)
+
+    if match:
+        return int(match.group(1)), int(match.group(2))
+
+    match = re.search(r"\b(\d+)\s*,\s*[^,]+?\b(\d+)\b", result_text)
+
+    if match:
+        return int(match.group(1)), int(match.group(2))
+
+    return None
+
+
+def normalize_score_fields(item, status):
+    home_score = get_first_score_value(item, SCORE_FIELDS["home"])
+    away_score = get_first_score_value(item, SCORE_FIELDS["away"])
+
+    if home_score is None or away_score is None:
+        parsed_scores = parse_result_scores(item.get("result"))
+
+        if parsed_scores is not None:
+            home_score, away_score = parsed_scores
+
+    if status == "past" and (home_score is None or away_score is None):
+        mapped_scores = COMPLETED_MATCH_RESULTS.get(item.get("id"))
+
+        if mapped_scores is not None:
+            home_score, away_score = mapped_scores
+
+    item["home_score"] = int(home_score) if home_score is not None else None
+    item["away_score"] = int(away_score) if away_score is not None else None
+
+    if item["home_score"] is not None and item["away_score"] is not None:
+        item["result"] = (
+            f"{item['home_en']} {item['home_score']} - "
+            f"{item['away_score']} {item['away_en']}"
+        )
+
+    return item
+
+
 def build_all_matches():
     data = get_raw_worldcup_data()
 
@@ -131,6 +239,8 @@ def build_all_matches():
                 "stage_label": normalize_stage(match["stage"]),
                 "stadium": match["stadium"],
                 "city": match["hostCity"],
+                "home_score": get_first_score_value(match, SCORE_FIELDS["home"]),
+                "away_score": get_first_score_value(match, SCORE_FIELDS["away"]),
                 "result": None,
             }
         )
@@ -155,6 +265,10 @@ def clean_match_for_json(match, status):
     item.pop("kickoff_dt", None)
 
     item["status"] = status
+    item = normalize_score_fields(item, status)
+
+    if status != "past" and item.get("home_score") is None and item.get("away_score") is None:
+        item["result"] = None
 
     if status == "past" and item.get("result") is None:
         item["result"] = "نتیجه هنوز ثبت نشده"
