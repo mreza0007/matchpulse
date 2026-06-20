@@ -3,6 +3,8 @@ import re
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+from db_service import get_all_match_score_overrides_from_db
+
 FIXTURES_URL = "https://www.thestatsapi.com/world-cup/data/fixtures.json"
 
 IRAN_TZ = ZoneInfo("Asia/Tehran")
@@ -112,6 +114,8 @@ COMPLETED_MATCH_RESULTS = {
     24: (1, 3),
     25: (1, 1),
 }
+
+LIVE_OVERRIDE_STATUSES = {"IN_PLAY", "LIVE", "PAUSED"}
 
 
 def get_raw_worldcup_data():
@@ -267,6 +271,9 @@ def clean_match_for_json(match, status):
     item["status"] = status
     item = normalize_score_fields(item, status)
 
+    if status == "live":
+        item["live_badge"] = True
+
     if status != "past" and item.get("home_score") is None and item.get("away_score") is None:
         item["result"] = None
 
@@ -276,19 +283,76 @@ def clean_match_for_json(match, status):
     return item
 
 
+def get_score_overrides():
+    try:
+        return get_all_match_score_overrides_from_db()
+    except Exception as error:
+        print(f"[MATCH_SCORE_OVERRIDE_ERROR] Static matches used without overrides: {error}")
+        return {}
+
+
+def apply_score_override(match, override):
+    if not override:
+        return match
+
+    item = dict(match)
+
+    item["external_match_id"] = override.get("external_match_id")
+    item["score_source"] = override.get("source")
+    item["score_last_updated"] = override.get("last_updated")
+    item["override_status"] = override.get("status")
+
+    if override.get("home_score") is not None:
+        item["home_score"] = override.get("home_score")
+
+    if override.get("away_score") is not None:
+        item["away_score"] = override.get("away_score")
+
+    if override.get("result"):
+        item["result"] = override.get("result")
+
+    return item
+
+
+def get_match_status(match, override, now_utc):
+    override_status = (override or {}).get("status")
+
+    if override_status == "FINISHED":
+        return "past"
+
+    if override_status in LIVE_OVERRIDE_STATUSES:
+        return "live"
+
+    return "past" if match["kickoff_dt"] < now_utc else "upcoming"
+
+
+def status_matches_filter(requested_status, match_status):
+    if requested_status == "all":
+        return True
+
+    if requested_status == "upcoming":
+        return match_status in {"upcoming", "live"}
+
+    return requested_status == match_status
+
+
 def get_real_matches(status="all"):
     now_utc = datetime.now(timezone.utc)
     all_matches = get_all_cached_matches()
+    overrides = get_score_overrides()
 
     matches = []
 
     for match in all_matches:
-        match_status = "past" if match["kickoff_dt"] < now_utc else "upcoming"
+        override = overrides.get(match["id"])
+        match_status = get_match_status(match, override, now_utc)
 
-        if status != "all" and status != match_status:
+        if not status_matches_filter(status, match_status):
             continue
 
-        matches.append(clean_match_for_json(match, match_status))
+        match_with_override = apply_score_override(match, override)
+
+        matches.append(clean_match_for_json(match_with_override, match_status))
 
     if status == "past":
         matches.sort(key=lambda item: item["kickoff"], reverse=True)

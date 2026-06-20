@@ -4,12 +4,20 @@ from datetime import datetime, timedelta
 
 BASE_URL = "https://api.football-data.org/v4"
 
-TOKEN = os.getenv("FOOTBALL_API_TOKEN")
+
+def is_configured():
+    return bool(os.getenv("FOOTBALL_API_TOKEN"))
 
 
-headers = {
-    "X-Auth-Token": TOKEN
-}
+def get_headers():
+    token = os.getenv("FOOTBALL_API_TOKEN")
+
+    if not token:
+        return None
+
+    return {
+        "X-Auth-Token": token,
+    }
 
 
 # 🔥 گرفتن همه بازی‌ها در بازه زمانی کوتاه
@@ -26,17 +34,43 @@ def get_matches(date_from=None, date_to=None):
         "dateTo": date_to
     }
 
+    headers = get_headers()
+
+    if headers is None:
+        print("[FOOTBALL_API_WARNING] FOOTBALL_API_TOKEN is not configured.")
+        return {
+            "ok": False,
+            "message": "FOOTBALL_API_TOKEN is not configured",
+            "matches": [],
+        }
+
     try:
         res = requests.get(url, headers=headers, params=params, timeout=10)
         res.raise_for_status()
-        return res.json()
+        data = res.json()
+        data["ok"] = True
+        return data
     except Exception as e:
         print("[FOOTBALL_API_ERROR]", str(e))
-        return {"matches": []}
+        return {
+            "ok": False,
+            "message": "football-data.org request failed",
+            "matches": [],
+        }
 
 
 # 🔥 فقط live + finished
 def get_live_and_finished():
+    headers = get_headers()
+
+    if headers is None:
+        print("[FOOTBALL_API_WARNING] FOOTBALL_API_TOKEN is not configured.")
+        return {
+            "ok": False,
+            "message": "FOOTBALL_API_TOKEN is not configured",
+            "matches": [],
+        }
+
     try:
         res = requests.get(
             f"{BASE_URL}/matches?status=LIVE,FINISHED",
@@ -44,7 +78,13 @@ def get_live_and_finished():
             timeout=10
         )
         res.raise_for_status()
-        return res.json()
+        data = res.json()
+        data["ok"] = True
+        return data
     except Exception as e:
         print("[FOOTBALL_API_ERROR]", str(e))
-        return {"matches": []}
+        return {
+            "ok": False,
+            "message": "football-data.org request failed",
+            "matches": [],
+        }

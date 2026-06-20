@@ -1,7 +1,9 @@
+import os
 from datetime import datetime, timezone, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from db_service import mark_reminder_notified
+from services.live_score_sync import sync_live_scores
 
 scheduler = BackgroundScheduler()
 
@@ -144,6 +146,47 @@ def check_all_notifications():
     check_favorite_team_matches()
 
 
+def live_score_sync_enabled():
+    return os.getenv("LIVE_SCORE_SYNC_ENABLED", "false").lower() == "true"
+
+
+def run_live_score_sync():
+    try:
+        summary = sync_live_scores()
+        print(
+            "[LIVE_SCORE_SYNC] "
+            f"ok={summary.get('ok')} "
+            f"fetched={summary.get('fetched')} "
+            f"matched={summary.get('matched')} "
+            f"updated={summary.get('updated')} "
+            f"skipped={summary.get('skipped')}"
+        )
+    except Exception as error:
+        print(f"[LIVE_SCORE_SYNC_ERROR] Sync skipped: {error}")
+
+
+def add_live_score_sync_job():
+    if not live_score_sync_enabled():
+        print("Live score sync disabled.")
+        return
+
+    if scheduler.get_job("matchpulse_live_score_sync") is not None:
+        print("Live score sync job already registered.")
+        return
+
+    scheduler.add_job(
+        run_live_score_sync,
+        "interval",
+        minutes=5,
+        id="matchpulse_live_score_sync",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    print("Live score sync job registered.")
+
+
 def start_scheduler(bot_app, reminders, favorite_teams, get_matches):
     scheduler_state["bot_app"] = bot_app
     scheduler_state["reminders"] = reminders
@@ -158,6 +201,8 @@ def start_scheduler(bot_app, reminders, favorite_teams, get_matches):
             id="matchpulse_notifications",
             replace_existing=True,
         )
+
+        add_live_score_sync_job()
 
         scheduler.start()
         print("Scheduler started...")

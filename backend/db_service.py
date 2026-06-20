@@ -50,6 +50,21 @@ def init_db():
         """
     )
 
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS match_score_overrides (
+            match_id INTEGER PRIMARY KEY,
+            external_match_id INTEGER,
+            status TEXT,
+            home_score INTEGER,
+            away_score INTEGER,
+            result TEXT,
+            last_updated TEXT,
+            source TEXT
+        )
+        """
+    )
+
     conn.commit()
     conn.close()
 
@@ -320,3 +335,84 @@ def get_all_favorite_teams_from_db():
         result[telegram_id].append(team)
 
     return result 
+
+
+def save_match_score_override_to_db(override):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        INSERT INTO match_score_overrides (
+            match_id,
+            external_match_id,
+            status,
+            home_score,
+            away_score,
+            result,
+            last_updated,
+            source
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(match_id) DO UPDATE SET
+            external_match_id = excluded.external_match_id,
+            status = excluded.status,
+            home_score = excluded.home_score,
+            away_score = excluded.away_score,
+            result = excluded.result,
+            last_updated = excluded.last_updated,
+            source = excluded.source
+        """,
+        (
+            override["match_id"],
+            override.get("external_match_id"),
+            override.get("status"),
+            override.get("home_score"),
+            override.get("away_score"),
+            override.get("result"),
+            override.get("last_updated"),
+            override.get("source"),
+        ),
+    )
+
+    conn.commit()
+    conn.close()
+
+
+def get_all_match_score_overrides_from_db():
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT
+            match_id,
+            external_match_id,
+            status,
+            home_score,
+            away_score,
+            result,
+            last_updated,
+            source
+        FROM match_score_overrides
+        """
+    )
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    overrides = {}
+
+    for row in rows:
+        overrides[row[0]] = {
+            "match_id": row[0],
+            "external_match_id": row[1],
+            "status": row[2],
+            "home_score": row[3],
+            "away_score": row[4],
+            "result": row[5],
+            "last_updated": row[6],
+            "source": row[7],
+        }
+
+    return overrides

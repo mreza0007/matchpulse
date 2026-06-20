@@ -7,6 +7,8 @@ from pydantic import BaseModel
 from scheduler_service import start_scheduler
 from data import NEWS
 from real_data_service import get_real_matches, get_real_teams
+from services import football_api
+from services.live_score_sync import sync_live_scores
 
 from db_service import (
     init_db,
@@ -144,6 +146,73 @@ def get_teams():
     return {
         "count": len(teams),
         "teams": teams,
+    }
+
+
+def sanitize_external_match(match):
+    score = match.get("score") or {}
+    full_time = score.get("fullTime") or {}
+    home_team = match.get("homeTeam") or {}
+    away_team = match.get("awayTeam") or {}
+
+    return {
+        "external_match_id": match.get("id"),
+        "competition_code": (match.get("competition") or {}).get("code"),
+        "utcDate": match.get("utcDate"),
+        "status": match.get("status"),
+        "homeTeam": {
+            "name": home_team.get("name"),
+        },
+        "awayTeam": {
+            "name": away_team.get("name"),
+        },
+        "score": {
+            "fullTime": {
+                "home": full_time.get("home"),
+                "away": full_time.get("away"),
+            }
+        },
+        "lastUpdated": match.get("lastUpdated"),
+    }
+
+
+@api.post("/admin/sync-live-scores")
+def admin_sync_live_scores():
+    return sync_live_scores()
+
+
+@api.get("/admin/debug-football-data")
+def admin_debug_football_data(
+    dateFrom: str = Query("2026-06-18"),
+    dateTo: str = Query("2026-06-21"),
+):
+    if not football_api.is_configured():
+        return {
+            "ok": False,
+            "skipped": True,
+            "message": "FOOTBALL_API_TOKEN is not configured",
+            "matches": [],
+        }
+
+    payload = football_api.get_matches(dateFrom, dateTo)
+    matches = payload.get("matches") or []
+
+    if payload.get("ok") is False:
+        return {
+            "ok": False,
+            "dateFrom": dateFrom,
+            "dateTo": dateTo,
+            "message": payload.get("message", "football-data.org request failed"),
+            "count": 0,
+            "matches": [],
+        }
+
+    return {
+        "ok": True,
+        "dateFrom": dateFrom,
+        "dateTo": dateTo,
+        "count": len(matches),
+        "matches": [sanitize_external_match(match) for match in matches],
     }
 
 

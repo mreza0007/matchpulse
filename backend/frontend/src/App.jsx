@@ -69,7 +69,7 @@ function BrandLogo() {
       {!hasError ? (
         <img
           className="brand-logo-img"
-          src="/world-cup-2026-logo.png"
+          src="/world-cup-2026-logo.webp"
           alt="World Cup 2026"
           onError={() => setHasError(true)}
         />
