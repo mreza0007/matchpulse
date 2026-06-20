@@ -61,6 +61,64 @@ function TeamFlag({ flagEmoji, teamName }) {
   );
 }
 
+function BrandLogo() {
+  const [hasError, setHasError] = useState(false);
+
+  return (
+    <div className="brand-logo" aria-label="World Cup 2026">
+      {!hasError ? (
+        <img
+          className="brand-logo-img"
+          src="/world-cup-2026-logo.png"
+          alt="World Cup 2026"
+          onError={() => setHasError(true)}
+        />
+      ) : (
+        <span className="brand-logo-fallback">WC 2026</span>
+      )}
+    </div>
+  );
+}
+
+function getScoreValue(match, keys) {
+  for (const key of keys) {
+    const value = match?.[key];
+
+    if (value !== undefined && value !== null && value !== "") {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function getMatchScore(match) {
+  const homeScore = getScoreValue(match, [
+    "home_score",
+    "homeScore",
+    "home_goals",
+    "homeGoals",
+    "home_team_score",
+    "homeTeamScore",
+    "score_home",
+    "scoreHome",
+  ]);
+  const awayScore = getScoreValue(match, [
+    "away_score",
+    "awayScore",
+    "away_goals",
+    "awayGoals",
+    "away_team_score",
+    "awayTeamScore",
+    "score_away",
+    "scoreAway",
+  ]);
+
+  if (homeScore === null || awayScore === null) return "";
+
+  return `${homeScore} - ${awayScore}`;
+}
+
 const translations = {
   fa: {
     dir: "rtl",
@@ -71,7 +129,7 @@ const translations = {
     subtitle: "برنامه هوشمند بازی‌های جام جهانی؛ دنبال‌کردن مسابقه‌ها، تیم‌های محبوب و یادآورها در یک‌جا.",
     nextMatch: "بازی بعدی",
     nextMatches: "بازی‌های پیش‌رو",
-    pastMatches: "بازی‌های گذشته",
+    pastMatches: "نتایج",
     latestNews: "آخرین اخبار",
     favorites: "تیم‌های محبوب",
     chooseFavorite: "تیم محبوبت را انتخاب کن",
@@ -101,8 +159,8 @@ const translations = {
     noReminders: "هنوز یادآور فعالی ثبت نشده.",
     unavailable: "نامشخص",
     home: "خانه",
-    upcoming: "آینده",
-    past: "گذشته",
+    upcoming: "بازی‌های پیش‌رو",
+    past: "نتایج",
     news: "اخبار",
     profile: "پروفایل",
     vs: "مقابل",
@@ -124,7 +182,7 @@ const translations = {
     subtitle: "Your World Cup companion for fixtures, favorite teams, and match reminders.",
     nextMatch: "Next Match",
     nextMatches: "Upcoming Matches",
-    pastMatches: "Past Matches",
+    pastMatches: "Results",
     latestNews: "Latest News",
     favorites: "Favorite Teams",
     chooseFavorite: "Choose your favorite team",
@@ -155,7 +213,7 @@ const translations = {
     unavailable: "Unavailable",
     home: "Home",
     upcoming: "Upcoming",
-    past: "Past",
+    past: "Results",
     news: "News",
     profile: "Profile",
     vs: "vs",
@@ -182,6 +240,7 @@ function MatchCard({
   onFavoriteToggle,
 }) {
   const teamButtons = [homeTeam, awayTeam].filter(Boolean);
+  const matchScore = getMatchScore(match);
 
   return (
     <article className="match-card">
@@ -195,7 +254,9 @@ function MatchCard({
           <TeamFlag flagEmoji={match.home_flag} teamName={match.home_en} />
           {match.home_en}
         </strong>
-        <span>{t.vs}</span>
+        <span className={matchScore ? "match-score" : "match-vs"}>
+          {matchScore || t.vs}
+        </span>
         <strong className="team-name">
           <TeamFlag flagEmoji={match.away_flag} teamName={match.away_en} />
           {match.away_en}
@@ -520,9 +581,7 @@ function App() {
     <main className={`app ${lang}`} dir={t.dir}>
       <section className="hero">
         <div className="hero-toolbar">
-          <div className="brand-mark" aria-label="MatchPulse">
-            <span>MP</span>
-          </div>
+          <BrandLogo />
           <div className="brand-copy">
             <strong>{t.title}</strong>
             <small>{t.brandLabel}</small>
