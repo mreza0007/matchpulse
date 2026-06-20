@@ -119,6 +119,62 @@ function getMatchScore(match) {
   return `${homeScore} - ${awayScore}`;
 }
 
+function getLocalizedTeamName(match, side, lang) {
+  const localizedKey = `${side}_${lang}`;
+  const englishKey = `${side}_en`;
+
+  return match?.[localizedKey] || match?.[englishKey] || "";
+}
+
+function normalizeMatchStatus(match) {
+  return String(match?.status || "").trim().toLowerCase();
+}
+
+function getMatchStatus(match, t, fallbackStatus = "upcoming") {
+  const normalizedStatus = normalizeMatchStatus(match);
+  const statusText = `${normalizedStatus} ${match?.result || ""}`.toLowerCase();
+  const hasFullTimeToken = /\b(ft|aet|pen)\b/.test(statusText);
+
+  if (normalizedStatus === "live" || (
+    statusText.includes("live") ||
+    statusText.includes("in_progress") ||
+    statusText.includes("in progress") ||
+    statusText.includes("ongoing") ||
+    statusText.includes("first half") ||
+    statusText.includes("second half") ||
+    statusText.includes("half-time") ||
+    statusText.includes("halftime")
+  )) {
+    return { key: "live", label: t.statusLive };
+  }
+
+  if (normalizedStatus === "past" || (
+    statusText.includes("finished") ||
+    statusText.includes("complete") ||
+    statusText.includes("completed") ||
+    statusText.includes("full time") ||
+    statusText.includes("full-time") ||
+    statusText.includes("past") ||
+    hasFullTimeToken
+  )) {
+    return { key: "finished", label: t.statusFinished };
+  }
+
+  if (normalizedStatus === "upcoming" || (
+    statusText.includes("scheduled") ||
+    statusText.includes("upcoming") ||
+    statusText.includes("not started") ||
+    statusText.includes("ns")
+  )) {
+    return { key: "upcoming", label: t.statusUpcoming };
+  }
+
+  return {
+    key: fallbackStatus === "finished" ? "finished" : "upcoming",
+    label: fallbackStatus === "finished" ? t.statusFinished : t.statusUpcoming,
+  };
+}
+
 const translations = {
   fa: {
     dir: "rtl",
@@ -129,6 +185,7 @@ const translations = {
     subtitle: "برنامه هوشمند بازی‌های جام جهانی؛ دنبال‌کردن مسابقه‌ها، تیم‌های محبوب و یادآورها در یک‌جا.",
     nextMatch: "بازی بعدی",
     nextMatches: "بازی‌های پیش‌رو",
+    liveMatches: "بازی‌های در جریان",
     pastMatches: "نتایج",
     latestNews: "آخرین اخبار",
     favorites: "تیم‌های محبوب",
@@ -159,6 +216,7 @@ const translations = {
     noReminders: "هنوز یادآور فعالی ثبت نشده.",
     unavailable: "نامشخص",
     home: "خانه",
+    live: "زنده",
     upcoming: "بازی‌های پیش‌رو",
     past: "نتایج",
     news: "اخبار",
@@ -168,6 +226,10 @@ const translations = {
     stage: "مرحله",
     city: "شهر",
     stadium: "ورزشگاه",
+    statusLive: "زنده",
+    statusFinished: "تمام‌شده",
+    statusUpcoming: "پیش‌رو",
+    scorePending: "نتیجه هنوز ثبت نشده",
     viewAll: "مشاهده همه",
     teams: "تیم",
     matches: "بازی",
@@ -182,6 +244,7 @@ const translations = {
     subtitle: "Your World Cup companion for fixtures, favorite teams, and match reminders.",
     nextMatch: "Next Match",
     nextMatches: "Upcoming Matches",
+    liveMatches: "Live Matches",
     pastMatches: "Results",
     latestNews: "Latest News",
     favorites: "Favorite Teams",
@@ -212,6 +275,7 @@ const translations = {
     noReminders: "No active reminders saved yet.",
     unavailable: "Unavailable",
     home: "Home",
+    live: "Live",
     upcoming: "Upcoming",
     past: "Results",
     news: "News",
@@ -221,6 +285,10 @@ const translations = {
     stage: "Stage",
     city: "City",
     stadium: "Stadium",
+    statusLive: "LIVE",
+    statusFinished: "Finished",
+    statusUpcoming: "Upcoming",
+    scorePending: "Score not recorded yet",
     viewAll: "View all",
     teams: "Teams",
     matches: "Matches",
@@ -238,28 +306,48 @@ function MatchCard({
   awayTeam,
   favoriteTeamIds,
   onFavoriteToggle,
+  lang,
 }) {
   const teamButtons = [homeTeam, awayTeam].filter(Boolean);
-  const matchScore = getMatchScore(match);
+  const matchStatus = getMatchStatus(match, t, showReminder ? "upcoming" : "finished");
+  const rawMatchScore = getMatchScore(match);
+  const matchScore =
+    matchStatus.key === "upcoming"
+      ? ""
+      : rawMatchScore || (matchStatus.key === "live" ? "0 - 0" : "");
+  const homeName = getLocalizedTeamName(match, "home", lang);
+  const awayName = getLocalizedTeamName(match, "away", lang);
+  const shouldShowScoreFallback = !matchScore && matchStatus.key === "finished";
 
   return (
-    <article className="match-card">
+    <article className={`match-card ${matchStatus.key === "live" ? "live-match" : ""}`}>
       <div className="match-top">
-        <span className="match-date">{match.date_iran}</span>
-        <span className="match-stage">{match.stage_label || match.stage}</span>
+        <div className="match-top-main">
+          <span className="match-date">{match.date_iran}</span>
+          <span className="match-stage">{match.stage_label || match.stage}</span>
+        </div>
+        <span className={`match-status ${matchStatus.key}`}>{matchStatus.label}</span>
       </div>
 
       <div className="teams">
         <strong className="team-name">
           <TeamFlag flagEmoji={match.home_flag} teamName={match.home_en} />
-          {match.home_en}
+          {homeName}
         </strong>
-        <span className={matchScore ? "match-score" : "match-vs"}>
-          {matchScore || t.vs}
+        <span
+          className={
+            matchScore
+              ? "match-score"
+              : shouldShowScoreFallback
+                ? "match-score-pending"
+                : "match-vs"
+          }
+        >
+          {matchScore || (shouldShowScoreFallback ? t.scorePending : t.vs)}
         </span>
         <strong className="team-name">
           <TeamFlag flagEmoji={match.away_flag} teamName={match.away_en} />
-          {match.away_en}
+          {awayName}
         </strong>
       </div>
 
@@ -376,6 +464,21 @@ function App() {
     });
     return lookup;
   }, [teams]);
+
+  const liveMatches = useMemo(
+    () => upcomingMatches.filter((match) => normalizeMatchStatus(match) === "live"),
+    [upcomingMatches],
+  );
+
+  const upcomingOnlyMatches = useMemo(
+    () => upcomingMatches.filter((match) => normalizeMatchStatus(match) === "upcoming"),
+    [upcomingMatches],
+  );
+
+  const pastOnlyMatches = useMemo(
+    () => pastMatches.filter((match) => normalizeMatchStatus(match) === "past"),
+    [pastMatches],
+  );
 
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
@@ -556,7 +659,12 @@ function App() {
     ? `@${telegramUser.username}`
     : t.noUsername;
 
-  const nextMatch = upcomingMatches[0];
+  const nextMatch = upcomingOnlyMatches[0];
+  const hasLiveMatches = liveMatches.length > 0;
+  const homeFeaturedMatches = hasLiveMatches ? liveMatches : nextMatch ? [nextMatch] : [];
+  const featuredMatch = homeFeaturedMatches[0];
+  const homeFeaturedTitle = hasLiveMatches ? t.liveMatches : t.nextMatch;
+  const homeFeaturedTab = hasLiveMatches ? "live" : "upcoming";
 
   const renderMatchCard = (match, options = {}) => {
     const { homeTeam, awayTeam } = getMatchTeams(match);
@@ -566,6 +674,7 @@ function App() {
         key={match.id}
         match={match}
         t={t}
+        lang={lang}
         onReminderToggle={toggleReminder}
         isReminderActive={reminderIds.has(match.id)}
         homeTeam={homeTeam}
@@ -613,24 +722,26 @@ function App() {
         </div>
 
         <div className="hero-card">
-          <span>{t.nextMatch}</span>
-          {nextMatch ? (
+          <span>{homeFeaturedTitle}</span>
+          {featuredMatch ? (
             <div className="hero-next-match">
               <strong className="hero-next-team">
-                <TeamFlag flagEmoji={nextMatch.home_flag} teamName={nextMatch.home_en} />
-                {nextMatch.home_en}
+                <TeamFlag flagEmoji={featuredMatch.home_flag} teamName={featuredMatch.home_en} />
+                {getLocalizedTeamName(featuredMatch, "home", lang)}
               </strong>
-              <b>{t.vs}</b>
+              <b>
+                {hasLiveMatches ? getMatchScore(featuredMatch) || "0 - 0" : t.vs}
+              </b>
               <strong className="hero-next-team">
-                <TeamFlag flagEmoji={nextMatch.away_flag} teamName={nextMatch.away_en} />
-                {nextMatch.away_en}
+                <TeamFlag flagEmoji={featuredMatch.away_flag} teamName={featuredMatch.away_en} />
+                {getLocalizedTeamName(featuredMatch, "away", lang)}
               </strong>
             </div>
           ) : (
             <strong>{t.loadingMatches}</strong>
           )}
           <small>
-            {nextMatch ? `${nextMatch.date_iran} - ${nextMatch.time_iran}` : ""}
+            {featuredMatch ? `${featuredMatch.date_iran} - ${featuredMatch.time_iran}` : ""}
           </small>
         </div>
       </section>
@@ -638,6 +749,10 @@ function App() {
       {activeTab === "home" && (
         <>
           <section className="quick-actions">
+            <button onClick={() => setActiveTab("live")}>
+              <span>●</span>
+              {t.liveMatches}
+            </button>
             <button onClick={() => setActiveTab("upcoming")}>
               <span>⚽</span>
               {t.nextMatches}
@@ -654,13 +769,15 @@ function App() {
 
           <section className="section">
             <div className="section-header">
-              <h2>{t.nextMatches}</h2>
-              <span onClick={() => setActiveTab("upcoming")}>{t.viewAll}</span>
+              <h2>{homeFeaturedTitle}</h2>
+              <span onClick={() => setActiveTab(homeFeaturedTab)}>{t.viewAll}</span>
             </div>
 
             <div className="matches">
-              {upcomingMatches.length === 0 && <p>{t.loadingMatches}</p>}
-              {upcomingMatches.slice(0, 5).map((match) => renderMatchCard(match))}
+              {homeFeaturedMatches.length === 0 && <p>{t.loadingMatches}</p>}
+              {homeFeaturedMatches.map((match) =>
+                renderMatchCard(match, { showReminder: !hasLiveMatches }),
+              )}
             </div>
 
             {(reminderMessage || favoriteMessage) && (
@@ -670,6 +787,19 @@ function App() {
         </>
       )}
 
+      {activeTab === "live" && (
+        <section className="section">
+          <div className="section-header">
+            <h2>{t.liveMatches}</h2>
+          </div>
+
+          <div className="matches">
+            {liveMatches.length === 0 && <p>{t.loadingMatches}</p>}
+            {liveMatches.map((match) => renderMatchCard(match, { showReminder: false }))}
+          </div>
+        </section>
+      )}
+
       {activeTab === "upcoming" && (
         <section className="section">
           <div className="section-header">
@@ -677,8 +807,8 @@ function App() {
           </div>
 
           <div className="matches">
-            {upcomingMatches.length === 0 && <p>{t.loadingMatches}</p>}
-            {upcomingMatches.map((match) => renderMatchCard(match))}
+            {upcomingOnlyMatches.length === 0 && <p>{t.loadingMatches}</p>}
+            {upcomingOnlyMatches.map((match) => renderMatchCard(match))}
           </div>
 
           {(reminderMessage || favoriteMessage) && (
@@ -694,8 +824,8 @@ function App() {
           </div>
 
           <div className="matches">
-            {pastMatches.length === 0 && <p>{t.loadingMatches}</p>}
-            {pastMatches.map((match) => renderMatchCard(match, { showReminder: false }))}
+            {pastOnlyMatches.length === 0 && <p>{t.loadingMatches}</p>}
+            {pastOnlyMatches.map((match) => renderMatchCard(match, { showReminder: false }))}
           </div>
         </section>
       )}
@@ -842,6 +972,13 @@ function App() {
           onClick={() => setActiveTab("home")}
         >
           🏠 {t.home}
+        </button>
+
+        <button
+          className={activeTab === "live" ? "active" : ""}
+          onClick={() => setActiveTab("live")}
+        >
+          ● {t.live}
         </button>
 
         <button

@@ -1,6 +1,6 @@
 import requests
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from db_service import get_all_match_score_overrides_from_db
@@ -115,6 +115,8 @@ COMPLETED_MATCH_RESULTS = {
     25: (1, 1),
 }
 
+MATCH_DURATION = timedelta(hours=2)
+FINISHED_OVERRIDE_STATUSES = {"FINISHED"}
 LIVE_OVERRIDE_STATUSES = {"IN_PLAY", "LIVE", "PAUSED"}
 
 
@@ -315,15 +317,20 @@ def apply_score_override(match, override):
 
 
 def get_match_status(match, override, now_utc):
-    override_status = (override or {}).get("status")
+    override_status = str((override or {}).get("status") or "").strip().upper()
+    kickoff_dt = match["kickoff_dt"]
+    finished_at = kickoff_dt + MATCH_DURATION
 
-    if override_status == "FINISHED":
+    if override_status in FINISHED_OVERRIDE_STATUSES:
         return "past"
 
     if override_status in LIVE_OVERRIDE_STATUSES:
         return "live"
 
-    return "past" if match["kickoff_dt"] < now_utc else "upcoming"
+    if kickoff_dt <= now_utc <= finished_at:
+        return "live"
+
+    return "past" if now_utc > finished_at else "upcoming"
 
 
 def status_matches_filter(requested_status, match_status):

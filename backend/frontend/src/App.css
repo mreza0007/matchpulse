@@ -337,7 +337,16 @@ h1 {
 }
 
 .match-card {
-  padding: 15px;
+  padding: 16px;
+}
+
+.match-card.live-match {
+  border-color: rgba(105, 255, 196, 0.24);
+  background:
+    linear-gradient(180deg, rgba(105, 255, 196, 0.105), rgba(255, 255, 255, 0.055));
+  box-shadow:
+    0 12px 34px rgba(0, 0, 0, 0.2),
+    inset 0 0 0 1px rgba(105, 255, 196, 0.06);
 }
 
 .news-card,
@@ -349,7 +358,15 @@ h1 {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
+}
+
+.match-top-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
 }
 
 .match-date {
@@ -369,23 +386,57 @@ h1 {
   white-space: nowrap;
 }
 
+.match-status {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.075);
+  color: rgba(247, 243, 255, 0.86);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.35;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.match-status.live {
+  border-color: rgba(105, 255, 196, 0.34);
+  background: rgba(105, 255, 196, 0.12);
+  color: #8dffd5;
+}
+
+.match-status.finished {
+  border-color: rgba(243, 199, 102, 0.26);
+  background: rgba(243, 199, 102, 0.12);
+  color: var(--gold);
+}
+
+.match-status.upcoming {
+  border-color: rgba(106, 124, 255, 0.34);
+  background: rgba(106, 124, 255, 0.13);
+  color: #cbd2ff;
+}
+
 .teams {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  gap: 10px;
-  margin: 18px 0 15px;
+  gap: 12px;
+  margin: 20px 0 16px;
   text-align: center;
 }
 
 .team-name {
   display: grid;
-  gap: 4px;
+  gap: 7px;
+  justify-items: center;
   min-width: 0;
   color: #ffffff;
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 700;
-  line-height: 1.5;
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
@@ -402,16 +453,32 @@ h1 {
   font-weight: 700;
 }
 
-.teams > .match-score {
+.teams > .match-score,
+.teams > .match-score-pending {
   width: auto;
-  min-width: 58px;
-  padding: 0 10px;
+  min-width: 64px;
+  min-height: 42px;
+  padding: 4px 12px;
   border-color: rgba(243, 199, 102, 0.34);
-  background: rgba(243, 199, 102, 0.14);
+  background:
+    linear-gradient(180deg, rgba(243, 199, 102, 0.2), rgba(243, 199, 102, 0.11));
   color: #ffffff;
-  font-size: 15px;
+  font-size: 18px;
   font-weight: 800;
+  line-height: 1.25;
   white-space: nowrap;
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.18);
+}
+
+.teams > .match-score-pending {
+  max-width: 96px;
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.075);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.55;
+  white-space: normal;
 }
 
 .team-flag {
@@ -597,7 +664,7 @@ h1 {
   bottom: 12px;
   transform: translateX(-50%);
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: 5px;
   width: min(520px, calc(100% - 22px));
   padding: 7px;
@@ -613,11 +680,11 @@ h1 {
   gap: 2px;
   border: 0;
   min-height: 46px;
-  padding: 8px 4px;
+  padding: 8px 3px;
   border-radius: 16px;
   background: transparent;
   color: rgba(247, 243, 255, 0.68);
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 500;
   line-height: 1.45;
   overflow-wrap: anywhere;
@@ -649,6 +716,11 @@ h1 {
 .app.fa {
   direction: rtl;
   letter-spacing: 0;
+}
+
+.app.fa .match-status {
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .app.en {
@@ -885,7 +957,23 @@ h1 {
   }
 
   .team-name {
-    font-size: 16px;
+    font-size: 15px;
+  }
+
+  .teams {
+    gap: 8px;
+  }
+
+  .teams > .match-score {
+    min-width: 58px;
+    padding-inline: 10px;
+    font-size: 17px;
+  }
+
+  .teams > .match-score-pending {
+    max-width: 82px;
+    padding-inline: 9px;
+    font-size: 10.5px;
   }
 
   .brand-logo {
@@ -894,7 +982,7 @@ h1 {
   }
 
   .bottom-nav button {
-    font-size: 10.5px;
+    font-size: 9.8px;
   }
 
   .match-meta-grid,
