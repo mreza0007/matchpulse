@@ -6,9 +6,8 @@ from pydantic import BaseModel
 
 from scheduler_service import start_scheduler
 from data import NEWS
-from real_data_service import get_real_matches, get_real_teams
-from services import football_api
-from services.live_score_sync import sync_live_scores
+from real_data_service import get_match_events, get_real_matches, get_real_teams
+from services.worldcup_adapter import get_match_live_from_varzesh3, start_varzesh3_poller
 
 from db_service import (
     init_db,
@@ -121,7 +120,7 @@ def get_users():
 
 
 @api.get("/matches")
-def get_matches(status: str = Query("upcoming")):
+def get_matches(status: str = Query("all")):
     matches = get_real_matches(status=status)
 
     return {
@@ -129,6 +128,16 @@ def get_matches(status: str = Query("upcoming")):
         "status": status,
         "matches": matches,
     }
+
+
+@api.get("/match/{match_id}/events")
+def get_events(match_id: int):
+    return get_match_events(match_id)
+
+
+@api.get("/match/{match_id}/live")
+def get_match_live(match_id: int):
+    return get_match_live_from_varzesh3(match_id)
 
 
 @api.get("/news")
@@ -146,73 +155,6 @@ def get_teams():
     return {
         "count": len(teams),
         "teams": teams,
-    }
-
-
-def sanitize_external_match(match):
-    score = match.get("score") or {}
-    full_time = score.get("fullTime") or {}
-    home_team = match.get("homeTeam") or {}
-    away_team = match.get("awayTeam") or {}
-
-    return {
-        "external_match_id": match.get("id"),
-        "competition_code": (match.get("competition") or {}).get("code"),
-        "utcDate": match.get("utcDate"),
-        "status": match.get("status"),
-        "homeTeam": {
-            "name": home_team.get("name"),
-        },
-        "awayTeam": {
-            "name": away_team.get("name"),
-        },
-        "score": {
-            "fullTime": {
-                "home": full_time.get("home"),
-                "away": full_time.get("away"),
-            }
-        },
-        "lastUpdated": match.get("lastUpdated"),
-    }
-
-
-@api.post("/admin/sync-live-scores")
-def admin_sync_live_scores():
-    return sync_live_scores()
-
-
-@api.get("/admin/debug-football-data")
-def admin_debug_football_data(
-    dateFrom: str = Query("2026-06-18"),
-    dateTo: str = Query("2026-06-21"),
-):
-    if not football_api.is_configured():
-        return {
-            "ok": False,
-            "skipped": True,
-            "message": "FOOTBALL_API_TOKEN is not configured",
-            "matches": [],
-        }
-
-    payload = football_api.get_matches(dateFrom, dateTo)
-    matches = payload.get("matches") or []
-
-    if payload.get("ok") is False:
-        return {
-            "ok": False,
-            "dateFrom": dateFrom,
-            "dateTo": dateTo,
-            "message": payload.get("message", "football-data.org request failed"),
-            "count": 0,
-            "matches": [],
-        }
-
-    return {
-        "ok": True,
-        "dateFrom": dateFrom,
-        "dateTo": dateTo,
-        "count": len(matches),
-        "matches": [sanitize_external_match(match) for match in matches],
     }
 
 
@@ -337,12 +279,28 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-bot_app = Application.builder().token(BOT_TOKEN).build()
-bot_app.add_handler(CommandHandler("start", start))
+def create_bot_app():
+    if not BOT_TOKEN:
+        print("Telegram bot disabled: BOT_TOKEN is not configured.")
+        return None
+
+    app = Application.builder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    return app
+
+
+bot_app = create_bot_app()
 
 
 @api.get("/test-notification/{telegram_id}")
 async def test_notification(telegram_id: int):
+    if bot_app is None:
+        return {
+            "success": False,
+            "message": "Telegram bot is not configured",
+            "telegram_id": telegram_id,
+        }
+
     try:
         await bot_app.bot.send_message(
             chat_id=telegram_id,
@@ -368,6 +326,14 @@ async def test_notification(telegram_id: int):
 
 @api.get("/test-match-reminder/{telegram_id}/{match_id}")
 async def test_match_reminder(telegram_id: int, match_id: int):
+    if bot_app is None:
+        return {
+            "success": False,
+            "message": "Telegram bot is not configured",
+            "telegram_id": telegram_id,
+            "match_id": match_id,
+        }
+
     matches = get_real_matches(status="all")
     selected_match = None
 
@@ -422,6 +388,7 @@ async def test_match_reminder(telegram_id: int, match_id: int):
 async def startup():
     init_db()
     load_memory_from_db()
+    start_varzesh3_poller()
 
     start_scheduler(
         bot_app=bot_app,
@@ -429,6 +396,10 @@ async def startup():
         favorite_teams=favorite_teams,
         get_matches=get_real_matches,
     )
+
+    if bot_app is None:
+        print("Backend started without Telegram polling.")
+        return
 
     try:
         await bot_app.initialize()
@@ -442,6 +413,9 @@ async def startup():
 
 @api.on_event("shutdown")
 async def shutdown():
+    if bot_app is None:
+        return
+
     try:
         if bot_app.updater.running:
             await bot_app.updater.stop()
