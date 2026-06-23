@@ -4,6 +4,9 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from db_service import mark_reminder_notified
 
+DEFAULT_BALL = "\u26bd"
+DEFAULT_STAR = "\u2b50"
+
 scheduler = BackgroundScheduler()
 
 scheduler_state = {
@@ -16,11 +19,14 @@ scheduler_state = {
 
 
 def build_match_message(match, reason):
+    home_flag = match.get("home_flag", DEFAULT_BALL)
+    away_flag = match.get("away_flag", DEFAULT_BALL)
+
     return (
         f"\U0001f514 {reason}\n\n"
-        f"{match.get('home_flag', '\u26bd')} {match.get('home_en')} "
+        f"{home_flag} {match.get('home_en')} "
         f"vs "
-        f"{match.get('away_flag', '\u26bd')} {match.get('away_en')}\n\n"
+        f"{away_flag} {match.get('away_en')}\n\n"
         f"\U0001f552 {match.get('date_iran')} - {match.get('time_iran')}\n"
         f"\U0001f3df {match.get('stadium')}\n"
         f"\U0001f4cd {match.get('city')}\n\n"
@@ -131,9 +137,10 @@ def check_favorite_team_matches():
                 if notification_key in sent_notifications:
                     continue
 
+                team_emoji = team.get("emoji", DEFAULT_STAR)
                 text = build_match_message(
                     match,
-                    f"\u0645\u0633\u0627\u0628\u0642\u0647 \u062a\u06cc\u0645 \u0645\u062d\u0628\u0648\u0628 \u0634\u0645\u0627: {team.get('emoji', '\u2b50')} {team.get('name_en')}",
+                    f"\u0645\u0633\u0627\u0628\u0642\u0647 \u062a\u06cc\u0645 \u0645\u062d\u0628\u0648\u0628 \u0634\u0645\u0627: {team_emoji} {team.get('name_en')}",
                 )
 
                 try:
