@@ -17,19 +17,25 @@ scheduler_state = {
 
 def build_match_message(match, reason):
     return (
-        f"🔔 {reason}\n\n"
-        f"{match.get('home_flag', '⚽')} {match.get('home_en')} "
+        f"\U0001f514 {reason}\n\n"
+        f"{match.get('home_flag', '\u26bd')} {match.get('home_en')} "
         f"vs "
-        f"{match.get('away_flag', '⚽')} {match.get('away_en')}\n\n"
-        f"🕒 {match.get('date_iran')} - {match.get('time_iran')}\n"
-        f"🏟 {match.get('stadium')}\n"
-        f"📍 {match.get('city')}\n\n"
-        f"بازی تا حدود یک ساعت دیگر شروع می‌شود."
+        f"{match.get('away_flag', '\u26bd')} {match.get('away_en')}\n\n"
+        f"\U0001f552 {match.get('date_iran')} - {match.get('time_iran')}\n"
+        f"\U0001f3df {match.get('stadium')}\n"
+        f"\U0001f4cd {match.get('city')}\n\n"
+        f"\u0628\u0627\u0632\u06cc \u062a\u0627 \u062d\u062f\u0648\u062f \u06cc\u06a9 \u0633\u0627\u0639\u062a \u062f\u06cc\u06af\u0631 \u0634\u0631\u0648\u0639 \u0645\u06cc\u200c\u0634\u0648\u062f."
     )
 
 
 def parse_kickoff(kickoff):
-    return datetime.fromisoformat(kickoff.replace("Z", "+00:00"))
+    if not kickoff:
+        return None
+
+    try:
+        return datetime.fromisoformat(str(kickoff).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
 
 
 async def send_telegram_message(bot_app, telegram_id, text):
@@ -41,7 +47,10 @@ async def send_telegram_message(bot_app, telegram_id, text):
 
 def should_notify(match):
     now = datetime.now(timezone.utc)
-    kickoff = parse_kickoff(match["kickoff"])
+    kickoff = parse_kickoff(match.get("kickoff"))
+
+    if kickoff is None:
+        return False
 
     notify_from = kickoff - timedelta(minutes=65)
     notify_until = kickoff - timedelta(minutes=55)
@@ -73,7 +82,7 @@ def check_manual_reminders():
 
             text = build_match_message(
                 match,
-                "یادآوری مسابقه",
+                "\u06cc\u0627\u062f\u0622\u0648\u0631\u06cc \u0645\u0633\u0627\u0628\u0642\u0647",
             )
 
             try:
@@ -124,7 +133,7 @@ def check_favorite_team_matches():
 
                 text = build_match_message(
                     match,
-                    f"مسابقه تیم محبوب شما: {team.get('emoji', '⭐')} {team.get('name_en')}",
+                    f"\u0645\u0633\u0627\u0628\u0642\u0647 \u062a\u06cc\u0645 \u0645\u062d\u0628\u0648\u0628 \u0634\u0645\u0627: {team.get('emoji', '\u2b50')} {team.get('name_en')}",
                 )
 
                 try:

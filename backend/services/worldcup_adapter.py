@@ -6,7 +6,7 @@ from urllib.parse import urljoin
 import requests
 
 REFRESH_INTERVAL_SECONDS = 10
-EVENT_TYPES = {"goal", "assist", "yellow_card", "red_card", "substitution"}
+DEFAULT_TIMEOUT_SECONDS = 10
 
 _cache_lock = threading.Lock()
 _cache = {
@@ -18,15 +18,22 @@ _poller_started = False
 
 
 def warn(message):
-    print(f"[VARZESH3_ADAPTER] {message}")
+    print(f"[WORLDCUP_WRAPPER] {message}")
 
 
-def get_varzesh3_base_url():
-    return os.getenv("VARZESH3_API_URL", "").strip()
+def get_wrapper_base_url():
+    return os.getenv("WORLDCUP_WRAPPER_URL", "").strip()
+
+
+def get_timeout_seconds():
+    try:
+        return float(os.getenv("WORLDCUP_WRAPPER_TIMEOUT", DEFAULT_TIMEOUT_SECONDS))
+    except (TypeError, ValueError):
+        return DEFAULT_TIMEOUT_SECONDS
 
 
 def build_url(path):
-    base_url = get_varzesh3_base_url()
+    base_url = get_wrapper_base_url()
 
     if not base_url:
         return ""
@@ -38,11 +45,11 @@ def fetch_json(path):
     url = build_url(path)
 
     if not url:
-        warn("VARZESH3_API_URL is not configured; using empty match data.")
+        warn("WORLDCUP_WRAPPER_URL is not configured; using empty match data.")
         return None
 
     try:
-        response = requests.get(url, timeout=15)
+        response = requests.get(url, timeout=get_timeout_seconds())
         response.raise_for_status()
         return response.json()
     except Exception as error:
@@ -105,85 +112,75 @@ def normalize_status(status):
     return "upcoming"
 
 
-def nested_score(match, side):
-    score = match.get("score") or {}
+def country_code_from_flag_url(flag_url):
+    marker = "flagcdn.com/w80/"
+    if not isinstance(flag_url, str) or marker not in flag_url:
+        return ""
 
-    for key in ("current", "fullTime", "regularTime", "halfTime"):
-        value = (score.get(key) or {}).get(side)
-
-        if value is not None:
-            return value
-
-    return None
+    code = flag_url.split(marker, 1)[1].split(".", 1)[0].strip().upper()
+    return code if len(code) == 2 and code.isalpha() else ""
 
 
-def team_name(match, side):
-    value = first_value(
-        match,
-        (
-            f"{side}_en",
-            f"{side}En",
-            f"{side}_team",
-            f"{side}Team",
-            f"{side}_name",
-            f"{side}Name",
-        ),
-    )
+def country_code_to_emoji(code):
+    if not code:
+        return "\u26bd"
 
-    if isinstance(value, dict):
-        return (
-            value.get("name_en")
-            or value.get("english_name")
-            or value.get("name")
-            or value.get("shortName")
-            or value.get("title")
-            or ""
-        )
-
-    return value or ""
+    return "".join(chr(127397 + ord(char)) for char in code.upper())
 
 
-def normalize_event_type(event_type):
-    normalized = str(event_type or "").strip().lower().replace("-", "_").replace(" ", "_")
+def flag_emoji(flag_url):
+    return country_code_to_emoji(country_code_from_flag_url(flag_url))
 
-    if normalized in EVENT_TYPES:
-        return normalized
 
-    if normalized in {"yellow", "yellowcard"}:
-        return "yellow_card"
+def normalize_event_type(event):
+    normalized = str(
+        event.get("normalized_type") or event.get("type") or event.get("event_type") or ""
+    ).strip().lower().replace("-", "_").replace(" ", "_")
 
-    if normalized in {"red", "redcard"}:
-        return "red_card"
+    allowed = {
+        "goal",
+        "yellow_card",
+        "red_card",
+        "substitution",
+        "var",
+        "penalty",
+        "own_goal",
+        "second_yellow_card",
+        "missed_penalty",
+        "injury",
+        "half_time",
+        "full_time",
+        "unknown",
+    }
 
-    if normalized in {"sub", "substitute"}:
-        return "substitution"
-
-    return None
+    return normalized if normalized in allowed else "unknown"
 
 
 def normalize_event(event):
     if not isinstance(event, dict):
         return None
 
-    event_type = normalize_event_type(event.get("type") or event.get("event_type"))
+    side = event.get("team_side")
+    if side not in {"home", "away"}:
+        side = str(event.get("team") or "").strip().lower()
 
-    if event_type is None:
-        return None
-
-    team = str(event.get("team") or event.get("side") or "").strip().lower()
-
-    if team not in {"home", "away"}:
-        team = "home" if team in {"1", "home_team"} else "away" if team in {"2", "away_team"} else ""
-
-    if team not in {"home", "away"}:
-        return None
+    if side not in {"home", "away"}:
+        side = ""
 
     return {
-        "minute": coerce_int(event.get("minute") or event.get("time")) or 0,
-        "type": event_type,
-        "team": team,
-        "player": str(event.get("player") or event.get("player_name") or "").strip(),
-        "assist": event.get("assist") or event.get("assist_player"),
+        "id": event.get("id"),
+        "minute": coerce_int(event.get("minute")) or 0,
+        "raw_minute": event.get("raw_minute"),
+        "type": normalize_event_type(event),
+        "normalized_type": normalize_event_type(event),
+        "team": side,
+        "team_side": side,
+        "team_name": event.get("team_name"),
+        "player": str(event.get("player") or "").strip(),
+        "assist": event.get("assist"),
+        "description": event.get("description"),
+        "video_url": event.get("video_url"),
+        "created_at": event.get("created_at"),
     }
 
 
@@ -203,37 +200,52 @@ def normalize_match(match):
     if not isinstance(match, dict):
         return None
 
-    home_score = first_value(match, ("home_score", "homeScore", "home_goals", "homeGoals"))
-    away_score = first_value(match, ("away_score", "awayScore", "away_goals", "awayGoals"))
+    match_id = first_value(match, ("id", "internal_match_id", "match_id", "matchId"))
+    normalized_match_id = coerce_int(match_id)
+    status = normalize_status(match.get("status"))
+    score = match.get("score") if isinstance(match.get("score"), dict) else {}
+    home_score = first_value(match, ("home_score", "homeScore"))
+    away_score = first_value(match, ("away_score", "awayScore"))
 
     if home_score is None:
-        home_score = nested_score(match, "home")
+        home_score = score.get("home")
 
     if away_score is None:
-        away_score = nested_score(match, "away")
+        away_score = score.get("away")
 
-    status = normalize_status(match.get("status"))
-    home = team_name(match, "home")
-    away = team_name(match, "away")
-    match_id = first_value(match, ("id", "match_id", "matchId", "matchNumber"))
-    normalized_match_id = coerce_int(match_id)
+    home_flag = match.get("home_flag") or ""
+    away_flag = match.get("away_flag") or ""
 
     return {
+        **match,
         "id": normalized_match_id if normalized_match_id is not None else match_id,
-        "home_en": home,
-        "away_en": away,
-        "home_flag": match.get("home_flag") or "⚽",
-        "away_flag": match.get("away_flag") or "⚽",
-        "home_team": home,
-        "away_team": away,
+        "internal_match_id": match.get("internal_match_id") or match_id,
+        "external_match_id": match.get("external_match_id"),
+        "provider": match.get("provider") or "worldcup2026",
+        "home_en": match.get("home_en") or match.get("home_team") or "",
+        "away_en": match.get("away_en") or match.get("away_team") or "",
+        "home_fa": match.get("home_fa") or "",
+        "away_fa": match.get("away_fa") or "",
+        "home_flag_url": home_flag,
+        "away_flag_url": away_flag,
+        "home_flag": flag_emoji(home_flag),
+        "away_flag": flag_emoji(away_flag),
+        "home_team": match.get("home_en") or match.get("home_team") or "",
+        "away_team": match.get("away_en") or match.get("away_team") or "",
         "home_score": coerce_int(home_score),
         "away_score": coerce_int(away_score),
+        "score": {
+            "home": coerce_int(home_score),
+            "away": coerce_int(away_score),
+        },
         "status": status,
         "live_badge": status == "live",
+        "raw_live_badge": match.get("live_badge"),
         "events": normalize_events(match.get("events") or []),
-        "score_source": "varzesh3",
+        "score_source": "worldcup_wrapper",
+        "kickoff": match.get("kickoff") or match.get("kickoff_utc") or "",
+        "kickoff_utc": match.get("kickoff_utc") or match.get("kickoff") or "",
         "date": match.get("date") or "",
-        "kickoff": match.get("kickoff") or match.get("kickoffUtc") or "",
         "date_iran": match.get("date_iran") or "",
         "time_iran": match.get("time_iran") or "",
         "datetime_iran": match.get("datetime_iran") or "",
@@ -241,12 +253,37 @@ def normalize_match(match):
         "stage": match.get("stage") or "",
         "stage_label": match.get("stage_label") or match.get("stage") or "",
         "stadium": match.get("stadium") or "",
-        "city": match.get("city") or match.get("hostCity") or "",
+        "city": match.get("city") or "",
         "result": match.get("result"),
+        "last_updated": match.get("last_updated"),
     }
 
 
-def fetch_matches_from_varzesh3():
+def normalize_team(team):
+    if not isinstance(team, dict):
+        return None
+
+    team_id = first_value(team, ("id", "team_id", "external_team_id"))
+    normalized_team_id = coerce_int(team_id)
+    flag = team.get("flag") or ""
+
+    return {
+        **team,
+        "id": normalized_team_id if normalized_team_id is not None else team_id,
+        "external_team_id": team.get("external_team_id"),
+        "provider": team.get("provider") or "worldcup2026",
+        "name_en": team.get("name_en") or team.get("team") or "",
+        "name_fa": team.get("name_fa") or team.get("name_en") or "",
+        "short_name": team.get("short_name") or team.get("name_en") or "",
+        "flag_url": flag,
+        "flag": flag_emoji(flag),
+        "emoji": flag_emoji(flag),
+        "logo": team.get("logo"),
+        "group": team.get("group") or "",
+    }
+
+
+def fetch_matches_from_wrapper():
     payload = fetch_json("/matches")
     matches = []
 
@@ -259,13 +296,104 @@ def fetch_matches_from_varzesh3():
     return matches
 
 
-def fetch_events_from_varzesh3(match_id):
+def fetch_teams_from_wrapper():
+    payload = fetch_json("/teams")
+    teams = []
+
+    for team in payload_list(payload, ("teams", "data", "results", "items")):
+        normalized_team = normalize_team(team)
+
+        if normalized_team is not None:
+            teams.append(normalized_team)
+
+    return teams
+
+
+def fetch_match_live_from_wrapper(match_id):
+    payload = fetch_json(f"/match/{match_id}/live")
+
+    if isinstance(payload, dict) and isinstance(payload.get("match"), dict):
+        return normalize_match(payload["match"])
+
+    return None
+
+
+def merge_match_metadata_with_live(metadata, live):
+    if metadata is None and live is None:
+        return None
+
+    if metadata is None:
+        return live
+
+    if live is None:
+        return metadata
+
+    merged = dict(metadata)
+    live_values = dict(live)
+
+    for key, value in live_values.items():
+        if value is not None and value != "":
+            merged[key] = value
+
+    for key in (
+        "id",
+        "internal_match_id",
+        "external_match_id",
+        "provider",
+        "home_en",
+        "away_en",
+        "home_fa",
+        "away_fa",
+        "home_team",
+        "away_team",
+        "home_flag",
+        "away_flag",
+        "home_flag_url",
+        "away_flag_url",
+        "kickoff",
+        "kickoff_utc",
+        "date",
+        "date_iran",
+        "time_iran",
+        "datetime_iran",
+        "group",
+        "stage",
+        "stage_label",
+        "stadium",
+        "city",
+        "result",
+    ):
+        metadata_value = metadata.get(key)
+        if metadata_value is not None and metadata_value != "":
+            merged[key] = metadata_value
+
+    for key in (
+        "status",
+        "status_title",
+        "is_live",
+        "live_badge",
+        "raw_live_badge",
+        "minute",
+        "raw_minute",
+        "home_score",
+        "away_score",
+        "score",
+        "last_updated",
+    ):
+        live_value = live_values.get(key)
+        if live_value is not None and live_value != "":
+            merged[key] = live_value
+
+    return merged
+
+
+def fetch_events_from_wrapper(match_id):
     payload = fetch_json(f"/match/{match_id}/events")
     return normalize_events(payload_list(payload, ("events", "timeline", "data", "items")))
 
 
 def refresh_cache():
-    matches = fetch_matches_from_varzesh3()
+    matches = fetch_matches_from_wrapper()
     events = {
         match["id"]: match.get("events") or []
         for match in matches
@@ -278,25 +406,29 @@ def refresh_cache():
         _cache["last_refresh"] = time.time()
 
 
-def poll_varzesh3():
+def poll_worldcup_wrapper():
     while True:
         refresh_cache()
         time.sleep(REFRESH_INTERVAL_SECONDS)
 
 
-def start_varzesh3_poller():
+def start_worldcup_wrapper_poller():
     global _poller_started
 
     if _poller_started:
         return
 
     _poller_started = True
-    thread = threading.Thread(target=poll_varzesh3, name="varzesh3-poller", daemon=True)
+    thread = threading.Thread(
+        target=poll_worldcup_wrapper,
+        name="worldcup-wrapper-poller",
+        daemon=True,
+    )
     thread.start()
 
 
 def ensure_cache_started():
-    start_varzesh3_poller()
+    start_worldcup_wrapper_poller()
 
     with _cache_lock:
         has_refreshed = _cache["last_refresh"] is not None
@@ -305,55 +437,75 @@ def ensure_cache_started():
         refresh_cache()
 
 
-def get_matches_from_varzesh3():
+def get_matches_from_worldcup_wrapper():
     ensure_cache_started()
 
     with _cache_lock:
         return [dict(match) for match in _cache["matches"]]
 
 
-def get_live_matches_from_varzesh3():
+def get_live_matches_from_worldcup_wrapper():
     return [
         match
-        for match in get_matches_from_varzesh3()
+        for match in get_matches_from_worldcup_wrapper()
         if match.get("status") == "live"
     ]
 
 
-def get_match_live_from_varzesh3(match_id):
+def get_match_live_from_worldcup_wrapper(match_id):
     try:
         normalized_match_id = int(match_id)
     except (TypeError, ValueError):
         normalized_match_id = match_id
 
-    for match in get_matches_from_varzesh3():
+    metadata_match = None
+    for match in get_matches_from_worldcup_wrapper():
         if match.get("id") == normalized_match_id:
-            return match
+            metadata_match = match
+            break
+
+    live_match = fetch_match_live_from_wrapper(normalized_match_id)
+    merged_match = merge_match_metadata_with_live(metadata_match, live_match)
+
+    if merged_match is not None:
+        return merged_match
 
     return {
         "id": normalized_match_id,
+        "internal_match_id": normalized_match_id,
         "status": "upcoming",
+        "status_title": "Upcoming",
+        "is_live": False,
         "live_badge": False,
         "events": [],
+        "wrapper_available": False,
     }
 
 
-def get_match_events_from_varzesh3(match_id):
+def get_match_events_from_worldcup_wrapper(match_id):
     try:
         normalized_match_id = int(match_id)
     except (TypeError, ValueError):
         normalized_match_id = match_id
 
+    events = fetch_events_from_wrapper(normalized_match_id)
+
     with _cache_lock:
-        cached_events = _cache["events"].get(normalized_match_id)
-
-    if cached_events is None:
-        cached_events = fetch_events_from_varzesh3(normalized_match_id)
-
-        with _cache_lock:
-            _cache["events"][normalized_match_id] = cached_events
+        _cache["events"][normalized_match_id] = events
 
     return {
         "match_id": normalized_match_id,
-        "events": cached_events,
+        "events": events,
     }
+
+
+def get_teams_from_worldcup_wrapper():
+    return fetch_teams_from_wrapper()
+
+
+# Backward-compatible names used by existing MatchPulse backend imports.
+start_varzesh3_poller = start_worldcup_wrapper_poller
+get_matches_from_varzesh3 = get_matches_from_worldcup_wrapper
+get_live_matches_from_varzesh3 = get_live_matches_from_worldcup_wrapper
+get_match_live_from_varzesh3 = get_match_live_from_worldcup_wrapper
+get_match_events_from_varzesh3 = get_match_events_from_worldcup_wrapper

@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from scheduler_service import start_scheduler
 from data import NEWS
 from real_data_service import get_match_events, get_real_matches, get_real_teams
-from services.worldcup_adapter import get_match_live_from_varzesh3, start_varzesh3_poller
+from services.worldcup_adapter import get_match_live_from_worldcup_wrapper, start_worldcup_wrapper_poller
 
 from db_service import (
     init_db,
@@ -137,7 +137,7 @@ def get_events(match_id: int):
 
 @api.get("/match/{match_id}/live")
 def get_match_live(match_id: int):
-    return get_match_live_from_varzesh3(match_id)
+    return get_match_live_from_worldcup_wrapper(match_id)
 
 
 @api.get("/news")
@@ -388,7 +388,7 @@ async def test_match_reminder(telegram_id: int, match_id: int):
 async def startup():
     init_db()
     load_memory_from_db()
-    start_varzesh3_poller()
+    start_worldcup_wrapper_poller()
 
     start_scheduler(
         bot_app=bot_app,
