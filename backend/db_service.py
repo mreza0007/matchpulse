@@ -31,11 +31,16 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             telegram_id INTEGER,
             team_id INTEGER,
+            team_key TEXT,
+            team_name TEXT,
             team_data TEXT,
             UNIQUE(telegram_id, team_id)
         )
         """
     )
+
+    ensure_column(cursor, "favorite_teams", "team_key", "TEXT")
+    ensure_column(cursor, "favorite_teams", "team_name", "TEXT")
 
     cursor.execute(
         """
@@ -65,10 +70,54 @@ def init_db():
         """
     )
 
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sent_notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            notification_key TEXT UNIQUE,
+            user_id INTEGER,
+            match_id TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
     conn.commit()
     conn.close()
 
     print("Database initialized...")
+
+
+def ensure_column(cursor, table_name, column_name, column_type):
+    cursor.execute(f"PRAGMA table_info({table_name})")
+    existing_columns = {row[1] for row in cursor.fetchall()}
+
+    if column_name not in existing_columns:
+        cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
+
+
+def normalize_team_key(value):
+    return "".join(str(value or "").strip().lower().split())
+
+
+def team_key_from_data(team):
+    return normalize_team_key(
+        team.get("team_key")
+        or team.get("name_en")
+        or team.get("home_en")
+        or team.get("away_en")
+        or team.get("name_fa")
+        or team.get("team_name")
+        or team.get("name")
+        or team.get("id")
+    )
+
+
+def prepare_favorite_team(team):
+    item = dict(team)
+    item["team_key"] = item.get("team_key") or team_key_from_data(item)
+    item["team_name"] = item.get("team_name") or item.get("name_en") or item.get("name_fa") or item.get("name")
+    return item
 
 
 def save_user_to_db(user):
@@ -132,20 +181,25 @@ def get_all_users_from_db():
 def save_favorite_team_to_db(telegram_id, team):
     conn = get_connection()
     cursor = conn.cursor()
+    favorite_team = prepare_favorite_team(team)
 
     cursor.execute(
         """
         INSERT OR IGNORE INTO favorite_teams (
             telegram_id,
             team_id,
+            team_key,
+            team_name,
             team_data
         )
-        VALUES (?, ?, ?)
+        VALUES (?, ?, ?, ?, ?)
         """,
         (
             telegram_id,
-            team["id"],
-            json.dumps(team, ensure_ascii=False),
+            favorite_team["id"],
+            favorite_team["team_key"],
+            favorite_team["team_name"],
+            json.dumps(favorite_team, ensure_ascii=False),
         ),
     )
 
@@ -169,19 +223,23 @@ def get_favorite_teams_from_db(telegram_id):
     rows = cursor.fetchall()
     conn.close()
 
-    return [json.loads(row[0]) for row in rows]
+    return [prepare_favorite_team(json.loads(row[0])) for row in rows]
 
 
-def delete_favorite_team_from_db(telegram_id, team_id):
+def delete_favorite_team_from_db(telegram_id, team_id, team_key=None):
     conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute(
         """
         DELETE FROM favorite_teams
-        WHERE telegram_id = ? AND team_id = ?
+        WHERE telegram_id = ?
+          AND (
+            team_id = ?
+            OR team_key = ?
+          )
         """,
-        (telegram_id, team_id),
+        (telegram_id, team_id, team_key),
     )
 
     deleted_count = cursor.rowcount
@@ -327,7 +385,7 @@ def get_all_favorite_teams_from_db():
 
     for row in rows:
         telegram_id = row[0]
-        team = json.loads(row[1])
+        team = prepare_favorite_team(json.loads(row[1]))
 
         if telegram_id not in result:
             result[telegram_id] = []
@@ -335,6 +393,111 @@ def get_all_favorite_teams_from_db():
         result[telegram_id].append(team)
 
     return result 
+
+
+def has_sent_notification(notification_key):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT 1
+        FROM sent_notifications
+        WHERE notification_key = ?
+        LIMIT 1
+        """,
+        (notification_key,),
+    )
+
+    row = cursor.fetchone()
+    conn.close()
+
+    return row is not None
+
+
+def mark_notification_sent(notification_key, user_id=None, match_id=None):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        INSERT OR IGNORE INTO sent_notifications (
+            notification_key,
+            user_id,
+            match_id
+        )
+        VALUES (?, ?, ?)
+        """,
+        (notification_key, user_id, str(match_id) if match_id is not None else None),
+    )
+
+    inserted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+
+    return inserted
+
+
+def delete_live_notification_history():
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        DELETE FROM sent_notifications
+        WHERE notification_key LIKE 'global_match_start:%'
+           OR notification_key LIKE 'global_match_finished:%'
+           OR notification_key LIKE 'favorite_match_start:%'
+           OR notification_key LIKE 'favorite_match_finished:%'
+           OR notification_key LIKE 'favorite_goal_for:%'
+           OR notification_key LIKE 'favorite_goal_against:%'
+        """
+    )
+
+    deleted_count = cursor.rowcount
+    conn.commit()
+    conn.close()
+
+    return deleted_count
+
+
+def get_all_users():
+    return get_all_users_from_db()
+
+
+def add_favorite_team(user_id, team):
+    save_favorite_team_to_db(user_id, team)
+    return get_favorite_teams_from_db(user_id)
+
+
+def remove_favorite_team(user_id, team):
+    team_id = team.get("id") if isinstance(team, dict) else team
+    delete_favorite_team_from_db(user_id, team_id)
+    return get_favorite_teams_from_db(user_id)
+
+
+def get_favorite_teams(user_id):
+    return get_favorite_teams_from_db(user_id)
+
+
+def get_users_by_favorite_team(team_name):
+    requested_key = normalize_team_key(team_name)
+    users = []
+
+    for telegram_id, teams in get_all_favorite_teams_from_db().items():
+        for team in teams:
+            keys = {
+                normalize_team_key(team.get("team_key")),
+                normalize_team_key(team.get("team_name")),
+                normalize_team_key(team.get("name_en")),
+                normalize_team_key(team.get("name_fa")),
+            }
+
+            if requested_key in keys:
+                users.append(telegram_id)
+                break
+
+    return users
 
 
 def save_match_score_override_to_db(override):

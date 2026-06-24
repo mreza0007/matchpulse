@@ -1,4 +1,5 @@
 import os
+import asyncio
 from dotenv import load_dotenv
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -65,7 +66,12 @@ class UserData(BaseModel):
 
 class FavoriteTeamData(BaseModel):
     telegram_id: int
-    team_id: int
+    team_id: int | str | None = None
+    team_key: str = ""
+    team_name: str = ""
+    name_en: str = ""
+    name_fa: str = ""
+    emoji: str = ""
 
 
 class ReminderData(BaseModel):
@@ -164,14 +170,18 @@ def save_favorite_team(data: FavoriteTeamData):
     selected_team = None
 
     for team in teams:
-        if team["id"] == data.team_id:
+        if str(team.get("id")) == str(data.team_id):
             selected_team = team
             break
 
     if selected_team is None:
-        return {
-            "success": False,
-            "message": "Team not found",
+        selected_team = {
+            "id": data.team_id or data.team_key or data.team_name or data.name_en or data.name_fa,
+            "team_key": data.team_key,
+            "team_name": data.team_name or data.name_en or data.name_fa,
+            "name_en": data.name_en or data.team_name,
+            "name_fa": data.name_fa or data.team_name or data.name_en,
+            "emoji": data.emoji or "\u26bd",
         }
 
     save_favorite_team_to_db(data.telegram_id, selected_team)
@@ -199,7 +209,7 @@ def get_favorite_teams(telegram_id: int):
 
 @api.delete("/favorite-team")
 def delete_favorite_team(data: FavoriteTeamData):
-    deleted = delete_favorite_team_from_db(data.telegram_id, data.team_id)
+    deleted = delete_favorite_team_from_db(data.telegram_id, data.team_id, data.team_key)
     favorite_teams[data.telegram_id] = get_favorite_teams_from_db(data.telegram_id)
 
     return {
@@ -395,6 +405,8 @@ async def startup():
         reminders=reminders,
         favorite_teams=favorite_teams,
         get_matches=get_real_matches,
+        get_events=get_match_events,
+        event_loop=asyncio.get_running_loop(),
     )
 
     if bot_app is None:

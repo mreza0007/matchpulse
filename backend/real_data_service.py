@@ -2,6 +2,7 @@ from services.worldcup_adapter import (
     get_match_events_from_worldcup_wrapper,
     get_matches_from_worldcup_wrapper,
     get_teams_from_worldcup_wrapper,
+    normalize_match_status,
 )
 
 
@@ -31,7 +32,11 @@ def get_real_matches(status="all"):
 
     for match in get_matches_from_worldcup_wrapper():
         item = dict(match)
-        item["status"] = normalized_status(item.get("status"))
+        status_info = normalize_match_status(item)
+        item["status"] = normalized_status(status_info["status"])
+        item["is_finished"] = status_info["is_finished"]
+        item["is_live"] = status_info["is_live"]
+        item["is_upcoming"] = status_info["is_upcoming"]
         item["live_badge"] = item["status"] == "live"
 
         if status_matches_filter(status, item["status"]):

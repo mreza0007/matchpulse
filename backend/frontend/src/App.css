@@ -100,8 +100,8 @@ button {
 
 .brand-logo {
   position: relative;
-  width: 72px;
-  height: 72px;
+  width: clamp(92px, 24vw, 124px);
+  height: clamp(92px, 24vw, 124px);
   display: grid;
   place-items: center;
   overflow: hidden;
@@ -242,6 +242,24 @@ h1 {
   gap: 10px;
 }
 
+.hero-next-list {
+  display: grid;
+  gap: 10px;
+}
+
+.hero-next-item {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.hero-next-item small {
+  text-align: center;
+}
+
 .hero-next-match b {
   color: var(--gold);
   font-size: 12px;
@@ -254,6 +272,31 @@ h1 {
   gap: 6px;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.favorite-star {
+  width: 30px;
+  height: 30px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(243, 199, 102, 0.2);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+  font-size: 17px;
+  line-height: 1;
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+
+.favorite-star.active {
+  border-color: rgba(243, 199, 102, 0.58);
+  background: rgba(243, 199, 102, 0.16);
+  color: var(--gold);
+}
+
+.favorite-star:hover {
+  transform: translateY(-1px);
 }
 
 .quick-actions {
@@ -326,6 +369,29 @@ h1 {
   gap: 14px;
 }
 
+.match-day-group {
+  display: grid;
+  gap: 10px;
+}
+
+.match-day-header {
+  width: fit-content;
+  margin: 4px 0 0;
+  padding: 6px 11px;
+  border: 1px solid rgba(243, 199, 102, 0.2);
+  border-radius: 999px;
+  background: rgba(243, 199, 102, 0.1);
+  color: var(--gold);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.match-day-list {
+  display: grid;
+  gap: 14px;
+}
+
 .match-card,
 .news-card,
 .team-card {
@@ -338,17 +404,11 @@ h1 {
 
 .match-card {
   padding: 16px;
-  cursor: pointer;
   transition:
     border-color 0.2s ease,
     box-shadow 0.2s ease,
     transform 0.2s ease,
     background 0.2s ease;
-}
-
-.match-card:focus-visible {
-  outline: 2px solid rgba(105, 255, 196, 0.55);
-  outline-offset: 3px;
 }
 
 .match-card:hover {
@@ -663,10 +723,10 @@ h1 {
 .event-row {
   position: relative;
   display: grid;
-  grid-template-columns: auto auto 1fr;
-  align-items: center;
-  gap: 5px 9px;
-  padding: 10px;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 10px 11px;
   padding-inline-start: 16px;
   border: 1px solid rgba(255, 255, 255, 0.085);
   border-radius: 14px;
@@ -700,7 +760,13 @@ h1 {
   line-height: 1;
 }
 
-.event-row strong {
+.event-body {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.event-body strong {
   color: #ffffff;
   font-size: 13px;
   font-weight: 700;
@@ -708,16 +774,35 @@ h1 {
 }
 
 .event-player,
-.event-row small {
+.event-assist,
+.event-lines,
+.event-team {
   color: rgba(247, 243, 255, 0.72);
   font-size: 12px;
   font-weight: 500;
   line-height: 1.55;
 }
 
-.event-player,
-.event-row small {
-  grid-column: 3;
+.event-lines {
+  display: grid;
+  gap: 2px;
+}
+
+.event-assist {
+  color: rgba(141, 255, 213, 0.86);
+}
+
+.event-team {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 2px;
+}
+
+.event-team .team-flag {
+  width: 25px;
+  height: 18px;
+  border-radius: 6px;
 }
 
 .event-row.yellow_card .event-minute {
@@ -725,9 +810,19 @@ h1 {
   color: var(--gold);
 }
 
+.event-row.goal .event-minute {
+  background: rgba(105, 255, 196, 0.14);
+  color: #8dffd5;
+}
+
 .event-row.red_card .event-minute {
   background: rgba(255, 112, 112, 0.14);
   color: #ffb1b1;
+}
+
+.event-row.substitution .event-minute {
+  background: rgba(106, 124, 255, 0.14);
+  color: #cbd2ff;
 }
 
 .card-actions {
@@ -741,7 +836,8 @@ h1 {
 }
 
 .chip-btn,
-.remind-btn {
+.remind-btn,
+.details-btn {
   border: 0;
   cursor: pointer;
   transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
@@ -791,8 +887,23 @@ h1 {
   box-shadow: none;
 }
 
+.details-btn {
+  width: 100%;
+  min-height: 46px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(105, 255, 196, 0.22);
+  border-radius: 15px;
+  background: rgba(105, 255, 196, 0.1);
+  color: #a8ffe0;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
 .chip-btn:hover,
-.remind-btn:hover {
+.remind-btn:hover,
+.details-btn:hover {
   transform: translateY(-1px);
 }
 
@@ -835,6 +946,14 @@ h1 {
   color: var(--soft);
   font-size: 12px;
   font-weight: 500;
+}
+
+.favorites-panel {
+  margin-bottom: 16px;
+}
+
+.inline-section-header {
+  margin-top: 18px;
 }
 
 .team-emoji {
@@ -1282,8 +1401,8 @@ h1 {
   }
 
   .brand-logo {
-    width: 68px;
-    height: 68px;
+    width: clamp(92px, 26vw, 112px);
+    height: clamp(92px, 26vw, 112px);
   }
 
   .bottom-nav button {

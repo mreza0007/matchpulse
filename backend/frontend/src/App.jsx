@@ -134,10 +134,124 @@ function getLocalizedTeamName(match, side, lang) {
   return match?.[localizedKey] || match?.[englishKey] || "";
 }
 
+function normalizeTeamKey(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, "");
+}
+
 function normalizeMatchStatus(match) {
-  if (match?.status === "live") return "live";
-  if (match?.status === "finished") return "finished";
+  const status = String(match?.status || "").toLowerCase().replace(/[-\s]/g, "_");
+
+  if (match?.is_live || status === "live") return "live";
+  if (match?.is_finished || status === "finished") return "finished";
   return "upcoming";
+}
+
+function isFutureMatchStatus(match) {
+  if (match?.is_upcoming) return true;
+
+  const status = String(match?.status || "").toLowerCase().replace(/[-\s]/g, "_");
+  return ["scheduled", "upcoming", "notstarted", "not_started"].includes(status);
+}
+
+function parseKickoffDate(match) {
+  const kickoffValue = match?.kickoff_iso || match?.kickoff_utc || match?.kickoff;
+
+  if (!kickoffValue || typeof kickoffValue !== "string") return null;
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(kickoffValue)) return null;
+
+  const isoValue = kickoffValue.endsWith("Z") || /[+-]\d{2}:\d{2}$/.test(kickoffValue)
+    ? kickoffValue
+    : `${kickoffValue}Z`;
+  const date = new Date(isoValue);
+
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getKickoffTime(match) {
+  const kickoffTs = Number(match?.kickoff_ts ?? match?.kickoff_timestamp);
+
+  if (Number.isFinite(kickoffTs)) {
+    return kickoffTs * 1000;
+  }
+
+  return parseKickoffDate(match)?.getTime() ?? Number.POSITIVE_INFINITY;
+}
+
+function getMatchDateKey(match) {
+  if (match?.date_key) return match.date_key;
+
+  const kickoffDate = parseKickoffDate(match);
+  if (!kickoffDate) return "";
+
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tehran",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(kickoffDate);
+}
+
+function formatTehranMatchDateTime(match, lang) {
+  const kickoffDate = parseKickoffDate(match);
+
+  if (!kickoffDate) {
+    return {
+      date: match?.date_iran || "",
+      time: match?.time_iran || "",
+      compact: [match?.date_iran, match?.time_iran].filter(Boolean).join(" - "),
+    };
+  }
+
+  const locale = lang === "fa" ? "fa-IR-u-ca-persian" : "en-US";
+  const date = new Intl.DateTimeFormat(locale, {
+    timeZone: "Asia/Tehran",
+    month: "short",
+    day: "numeric",
+    weekday: "short",
+  }).format(kickoffDate);
+  const time = new Intl.DateTimeFormat(locale, {
+    timeZone: "Asia/Tehran",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(kickoffDate);
+
+  return {
+    date,
+    time,
+    compact: `${date} - ${time}`,
+  };
+}
+
+function getGroupLabel(match, lang) {
+  if (lang === "fa") {
+    return [match.weekday_fa, match.date_label_fa || match.date_iran].filter(Boolean).join(" - ");
+  }
+
+  return formatTehranMatchDateTime(match, lang).date;
+}
+
+function groupMatchesByDate(matches, lang) {
+  const groups = [];
+
+  matches.forEach((match) => {
+    const dateKey = getMatchDateKey(match) || `unknown-${groups.length}`;
+    const currentGroup = groups[groups.length - 1];
+
+    if (currentGroup?.dateKey === dateKey) {
+      currentGroup.matches.push(match);
+      return;
+    }
+
+    groups.push({
+      dateKey,
+      label: getGroupLabel(match, lang),
+      match,
+      matches: [match],
+    });
+  });
+
+  return groups;
 }
 
 function getMatchStatus(match, t) {
@@ -167,6 +281,7 @@ const translations = {
     brandLabel: "همراه جام جهانی",
     subtitle: "برنامه هوشمند بازی‌های جام جهانی؛ دنبال‌کردن مسابقه‌ها، تیم‌های محبوب و یادآورها در یک‌جا.",
     nextMatch: "بازی بعدی",
+    nextMatchesTitle: "بازی‌های بعدی",
     nextMatches: "بازی‌های پیش‌رو",
     liveMatches: "بازی‌های در جریان",
     pastMatches: "نتایج",
@@ -195,8 +310,13 @@ const translations = {
     cancelReminder: "حذف یادآور",
     addFavorite: "محبوب کن",
     removeFavorite: "حذف محبوب",
-    noFavorites: "هنوز تیم محبوبی انتخاب نشده.",
+    noFavorites: "هنوز تیم محبوبی انتخاب نکردی",
     noReminders: "هنوز یادآور فعالی ثبت نشده.",
+    noLiveMatches: "فعلاً بازی زنده‌ای در جریان نیست",
+    noUpcomingMatches: "فعلاً بازی پیش‌رویی پیدا نشد",
+    noPastMatches: "هنوز نتیجه‌ای ثبت نشده است",
+    noNews: "فعلاً خبری برای نمایش نیست",
+    matchesError: "دریافت بازی‌ها ناموفق بود. دوباره تلاش کن.",
     unavailable: "نامشخص",
     home: "خانه",
     live: "زنده",
@@ -213,9 +333,14 @@ const translations = {
     statusFinished: "تمام‌شده",
     statusUpcoming: "پیش‌رو",
     scorePending: "نتیجه هنوز ثبت نشده",
-    matchEvents: "خط زمانی بازی",
+    matchEvents: "رویدادها",
     loadingEvents: "در حال دریافت رویدادها...",
-    noEvents: "هنوز رویدادی ثبت نشده",
+    noEvents: "برای این بازی هنوز رویدادی ثبت نشده است",
+    eventSourceUnavailable: "جزئیات این بازی هنوز از منبع داده دریافت نشده است",
+    viewEvents: "مشاهده رویدادها",
+    assistLabel: "پاس گل",
+    playerInLabel: "",
+    playerOutLabel: "",
     viewAll: "مشاهده همه",
     teams: "تیم",
     matches: "بازی",
@@ -229,6 +354,7 @@ const translations = {
     brandLabel: "World Cup Companion",
     subtitle: "Your World Cup companion for fixtures, favorite teams, and match reminders.",
     nextMatch: "Next Match",
+    nextMatchesTitle: "Next Matches",
     nextMatches: "Upcoming Matches",
     liveMatches: "Live Matches",
     pastMatches: "Results",
@@ -259,6 +385,11 @@ const translations = {
     removeFavorite: "Remove favorite",
     noFavorites: "No favorite teams selected yet.",
     noReminders: "No active reminders saved yet.",
+    noLiveMatches: "No live matches are currently in progress.",
+    noUpcomingMatches: "No future matches were found.",
+    noPastMatches: "No results are available yet.",
+    noNews: "No news to show yet.",
+    matchesError: "Could not load matches. Please try again.",
     unavailable: "Unavailable",
     home: "Home",
     live: "Live",
@@ -275,9 +406,14 @@ const translations = {
     statusFinished: "Finished",
     statusUpcoming: "Upcoming",
     scorePending: "Score not recorded yet",
-    matchEvents: "Match timeline",
+    matchEvents: "Events",
     loadingEvents: "Loading timeline...",
-    noEvents: "No events recorded yet",
+    noEvents: "No events have been recorded for this match yet.",
+    eventSourceUnavailable: "Match details have not been received from the data source yet.",
+    viewEvents: "View events",
+    assistLabel: "Assist",
+    playerInLabel: "",
+    playerOutLabel: "",
     viewAll: "View all",
     teams: "Teams",
     matches: "Matches",
@@ -314,15 +450,123 @@ function getEventIcon(type) {
   return "•";
 }
 
-function getEventTeamLabel(team, lang) {
-  if (lang === "fa") {
-    if (team === "home") return "\u0645\u06cc\u0632\u0628\u0627\u0646";
-    if (team === "away") return "\u0645\u0647\u0645\u0627\u0646";
+function getLegacyEventIcon(type) {
+  if (type === "goal") return "⚽";
+  if (type === "yellow_card") return "🟨";
+  if (type === "red_card") return "🟥";
+  if (type === "substitution") return "🔁";
+  return "•";
+}
+
+void getEventIcon;
+void getLegacyEventIcon;
+
+function getFirstEventValue(event, keys) {
+  for (const key of keys) {
+    const value = event?.[key];
+
+    if (value !== undefined && value !== null && value !== "") return value;
   }
 
-  if (team === "home") return "Home";
-  if (team === "away") return "Away";
-  return team || "";
+  return "";
+}
+
+function normalizeEventSide(event) {
+  const side = String(
+    getFirstEventValue(event, ["team_side", "side", "home_or_away", "team"]) || "",
+  )
+    .toLowerCase()
+    .replace(/[-\s]/g, "_");
+
+  if (["home", "host", "home_team"].includes(side)) return "home";
+  if (["away", "guest", "away_team"].includes(side)) return "away";
+  return "";
+}
+
+function resolveEventTeam(event, match, lang) {
+  const side = normalizeEventSide(event);
+
+  if (side === "home") {
+    return {
+      flag: match.home_flag,
+      name: getLocalizedTeamName(match, "home", lang),
+      englishName: match.home_en,
+    };
+  }
+
+  if (side === "away") {
+    return {
+      flag: match.away_flag,
+      name: getLocalizedTeamName(match, "away", lang),
+      englishName: match.away_en,
+    };
+  }
+
+  const teamName = getFirstEventValue(event, ["team_name", "teamName"]);
+  const blockedNames = new Set(["home", "away", "host", "guest", "میزبان", "مهمان"]);
+
+  return {
+    flag: "",
+    name: blockedNames.has(String(teamName).toLowerCase()) ? "" : teamName,
+    englishName: teamName,
+  };
+}
+
+function getEventPlayer(event) {
+  return getFirstEventValue(event, [
+    "player",
+    "player_name",
+    "playerName",
+    "scorer",
+    "goal_scorer",
+  ]);
+}
+
+function EventRow({ event, match, lang, t, index }) {
+  const type = event.type || event.normalized_type || "unknown";
+  const team = resolveEventTeam(event, match, lang);
+  const player = getEventPlayer(event);
+  const eventMinute = event.display_minute || event.raw_minute || event.minute || "";
+  const assist = getFirstEventValue(event, ["assist", "assist_name", "assistName"]);
+  const playerIn = getFirstEventValue(event, ["player_in", "playerIn", "in_player"]);
+  const playerOut = getFirstEventValue(event, ["player_out", "playerOut", "out_player"]);
+  const title = getEventTypeLabel(type, lang) || event.description || type;
+  const eventIcon = {
+    goal: "\u26bd",
+    yellow_card: "\ud83d\udfe8",
+    red_card: "\ud83d\udfe5",
+    substitution: "\ud83d\udd01",
+  }[type] || "\u2022";
+  const key = [eventMinute, type, player, playerIn, playerOut, index].join("-");
+
+  return (
+    <li className={`event-row ${type}`} key={key}>
+      <span className="event-minute">{eventMinute}'</span>
+      <span className="event-icon" aria-hidden="true">
+        {eventIcon}
+      </span>
+      <div className="event-body">
+        <strong>{title}</strong>
+        {type === "substitution" ? (
+          <div className="event-lines">
+            {playerIn && <span>{"\ud83d\udfe2\u2b06\ufe0f "}{playerIn}</span>}
+            {playerOut && <span>{"\ud83d\udd34\u2b07\ufe0f "}{playerOut}</span>}
+          </div>
+        ) : (
+          player && <span className="event-player">{player}</span>
+        )}
+        {type === "goal" && assist && (
+          <span className="event-assist">{"\ud83d\udc5f "}{t.assistLabel}: {assist}</span>
+        )}
+        {(team.name || team.flag) && (
+          <small className="event-team">
+            <TeamFlag flagEmoji={team.flag} teamName={team.englishName} />
+            {team.name}
+          </small>
+        )}
+      </div>
+    </li>
+  );
 }
 
 function MatchCard({
@@ -334,15 +578,16 @@ function MatchCard({
   homeTeam,
   awayTeam,
   favoriteTeamIds,
+  favoriteTeamKeys,
   onFavoriteToggle,
   lang,
-  onMatchClick,
+  onDetailsClick,
   isExpanded = false,
   events = [],
   isLoadingEvents = false,
+  eventsUnavailable = false,
   isScoreChanged = false,
 }) {
-  const teamButtons = [homeTeam, awayTeam].filter(Boolean);
   const matchStatus = getMatchStatus(match, t);
   const isLive = match.status === "live";
   const matchScoreValue = getMatchScore(match);
@@ -353,36 +598,49 @@ function MatchCard({
   const homeName = getLocalizedTeamName(match, "home", lang);
   const awayName = getLocalizedTeamName(match, "away", lang);
   const shouldShowScoreFallback = !matchScore && matchStatus.key === "finished";
-  const handleCardClick = () => onMatchClick?.(match);
+  const matchDateTime = formatTehranMatchDateTime(match, lang);
+  const canViewEvents = matchStatus.key === "finished";
   const stopCardClick = (event) => event.stopPropagation();
+  const renderTeamName = (name, flag, englishName, team) => {
+    const isFavorite = team
+      ? favoriteTeamIds.has(String(team.id)) ||
+        favoriteTeamKeys.has(normalizeTeamKey(team.team_key || team.name_en || team.name_fa || team.team_name || team.id))
+      : false;
+
+    return (
+      <strong className="team-name">
+        <TeamFlag flagEmoji={flag} teamName={englishName} />
+        {name}
+        {team && (
+          <button
+            className={`favorite-star ${isFavorite ? "active" : ""}`}
+            aria-label={isFavorite ? t.removeFavorite : t.addFavorite}
+            onClick={(event) => {
+              event.stopPropagation();
+              onFavoriteToggle(team);
+            }}
+          >
+            {isFavorite ? "\u2605" : "\u2606"}
+          </button>
+        )}
+      </strong>
+    );
+  };
 
   return (
     <article
       className={`match-card ${isLive ? "live-match" : ""} ${isExpanded ? "selected" : ""}`}
-      onClick={handleCardClick}
-      onKeyDown={(event) => {
-        if (event.target !== event.currentTarget) return;
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          handleCardClick();
-        }
-      }}
-      role="button"
-      tabIndex={0}
     >
       <div className="match-top">
         <div className="match-top-main">
-          <span className="match-date">{match.date_iran}</span>
+          <span className="match-date">{matchDateTime.date}</span>
           <span className="match-stage">{match.stage_label || match.stage}</span>
         </div>
         {isLive && <span className="match-status live live-pulse">{matchStatus.label}</span>}
       </div>
 
       <div className="teams">
-        <strong className="team-name">
-          <TeamFlag flagEmoji={match.home_flag} teamName={match.home_en} />
-          {homeName}
-        </strong>
+        {renderTeamName(homeName, match.home_flag, match.home_en, homeTeam)}
         <span
           className={
             matchScore
@@ -394,14 +652,11 @@ function MatchCard({
         >
           {matchScore || (shouldShowScoreFallback ? t.scorePending : t.vs)}
         </span>
-        <strong className="team-name">
-          <TeamFlag flagEmoji={match.away_flag} teamName={match.away_en} />
-          {awayName}
-        </strong>
+        {renderTeamName(awayName, match.away_flag, match.away_en, awayTeam)}
       </div>
 
       <div className="match-meta-grid">
-        <span>🕒 {match.time_iran}</span>
+        <span>🕒 {matchDateTime.time}</span>
         {match.group && (
           <span>
             🏆 {t.group} {match.group}
@@ -417,25 +672,6 @@ function MatchCard({
         </div>
       )}
 
-      {teamButtons.length > 0 && (
-        <div className="card-actions favorite-actions" onClick={stopCardClick}>
-          {teamButtons.map((team) => {
-            const isFavorite = favoriteTeamIds.has(team.id);
-
-            return (
-              <button
-                key={team.id}
-                className={`chip-btn ${isFavorite ? "active" : ""}`}
-                onClick={() => onFavoriteToggle(team.id)}
-              >
-                <span>{isFavorite ? "★" : "☆"}</span>
-                {team.emoji} {isFavorite ? t.removeFavorite : t.addFavorite}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
       {showReminder && (
         <button
           className={`remind-btn ${isReminderActive ? "active" : ""}`}
@@ -448,26 +684,30 @@ function MatchCard({
         </button>
       )}
 
+      {canViewEvents && (
+        <button className="details-btn" onClick={() => onDetailsClick?.(match)}>
+          {t.viewEvents}
+        </button>
+      )}
+
       {isExpanded && (
         <div className="match-events" onClick={stopCardClick}>
           <h3>{t.matchEvents}</h3>
           {isLoadingEvents ? (
             <p>{t.loadingEvents}</p>
+          ) : eventsUnavailable ? (
+            <p>{t.eventSourceUnavailable}</p>
           ) : events.length > 0 ? (
             <ol className="event-timeline">
               {events.map((event, index) => (
-                <li
-                  className={`event-row ${event.type || ""}`}
+                <EventRow
+                  event={event}
+                  index={index}
                   key={`${event.minute}-${event.type}-${event.player}-${event.team}-${index}`}
-                >
-                  <span className="event-minute">{event.minute ?? ""}'</span>
-                  <span className="event-icon" aria-hidden="true">
-                    {getEventIcon(event.type)}
-                  </span>
-                  <strong>{getEventTypeLabel(event.type, lang)}</strong>
-                  <span className="event-player">{event.player || ""}</span>
-                  <small>{getEventTeamLabel(event.team, lang)}</small>
-                </li>
+                  lang={lang}
+                  match={match}
+                  t={t}
+                />
               ))}
             </ol>
           ) : (
@@ -500,9 +740,9 @@ function TeamCard({ team, lang, t, isFavorite, onToggle }) {
       </div>
       <button
         className={`chip-btn ${isFavorite ? "active" : ""}`}
-        onClick={() => onToggle(team.id)}
+        onClick={() => onToggle(team)}
       >
-        <span>{isFavorite ? "★" : "☆"}</span>
+        <span>{isFavorite ? "\u2605" : "\u2606"}</span>
         {isFavorite ? t.removeFavorite : t.addFavorite}
       </button>
     </article>
@@ -514,25 +754,37 @@ function App() {
   const [lang, setLang] = useState("fa");
   const [activeTab, setActiveTab] = useState("home");
   const [telegramUser] = useState(initialTelegramUser);
-  const [isUserSaved] = useState(Boolean(initialTelegramUser));
+  const [isUserSaved, setIsUserSaved] = useState(false);
 
   const [matches, setMatches] = useState([]);
+  const [isLoadingMatches, setIsLoadingMatches] = useState(true);
+  const [matchesError, setMatchesError] = useState("");
+  const [currentTime, setCurrentTime] = useState(0);
   const [newsItems] = useState([]);
-  const [teams] = useState([]);
+  const [teams, setTeams] = useState([]);
   const [favoriteTeams, setFavoriteTeams] = useState([]);
   const [favoriteMessage, setFavoriteMessage] = useState("");
   const [reminders, setReminders] = useState([]);
   const [reminderMessage, setReminderMessage] = useState("");
   const [selectedMatchId, setSelectedMatchId] = useState(null);
   const [matchEventsById, setMatchEventsById] = useState({});
+  const [eventUnavailableMatchIds, setEventUnavailableMatchIds] = useState(() => new Set());
   const [loadingEventsId, setLoadingEventsId] = useState(null);
   const [scoreChangedMatchIds, setScoreChangedMatchIds] = useState(() => new Set());
   const scoreChangeTimeouts = useRef(new Map());
 
   const t = translations[lang];
+  const telegramId = telegramUser?.id;
 
   const favoriteTeamIds = useMemo(
-    () => new Set(favoriteTeams.map((team) => team.id)),
+    () => new Set(favoriteTeams.map((team) => String(team.id))),
+    [favoriteTeams],
+  );
+
+  const favoriteTeamKeys = useMemo(
+    () => new Set(
+      favoriteTeams.map((team) => normalizeTeamKey(team.team_key || team.name_en || team.name_fa || team.team_name || team.id)),
+    ),
     [favoriteTeams],
   );
 
@@ -550,19 +802,76 @@ function App() {
     return lookup;
   }, [teams]);
 
+  const teamPayload = (team) => ({
+    team_id: team.id,
+    team_key: team.team_key || normalizeTeamKey(team.name_en || team.name_fa || team.team_name || team.id),
+    team_name: team.team_name || team.name_en || team.name_fa,
+    name_en: team.name_en || team.team_name || team.name_fa,
+    name_fa: team.name_fa || team.team_name || team.name_en,
+    emoji: team.emoji || team.flag || "\u26bd",
+  });
+
+  const isTeamFavorite = (team) => (
+    favoriteTeamIds.has(String(team.id)) ||
+    favoriteTeamKeys.has(normalizeTeamKey(team.team_key || team.name_en || team.name_fa || team.team_name || team.id))
+  );
+
+  const getTeamDisplayName = (team) => (
+    lang === "fa"
+      ? team.name_fa || team.team_name || team.name_en
+      : team.name_en || team.team_name || team.name_fa
+  );
+
+  const teamFromMatch = (match, side) => ({
+    id: match[`${side}_team_id`] || match[`${side}_en`] || match[`${side}_fa`] || `${match.id}-${side}`,
+    team_key: normalizeTeamKey(match[`${side}_en`] || match[`${side}_fa`] || match[`${side}_team`]),
+    team_name: match[`${side}_en`] || match[`${side}_fa`] || match[`${side}_team`],
+    name_en: match[`${side}_en`] || match[`${side}_team`] || "",
+    name_fa: match[`${side}_fa`] || match[`${side}_en`] || "",
+    emoji: match[`${side}_flag`] || "\u26bd",
+    flag: match[`${side}_flag`] || "\u26bd",
+  });
+
   const liveMatches = useMemo(
-    () => matches.filter((match) => match.status === "live"),
+    () => matches.filter((match) => match.is_live === true || match.status === "live"),
     [matches],
   );
 
-  const upcomingOnlyMatches = useMemo(
-    () => matches.filter((match) => normalizeMatchStatus(match) === "upcoming"),
-    [matches],
+  const futureMatches = useMemo(
+    () => matches
+      .filter(
+        (match) =>
+          match.is_finished !== true &&
+          match.is_live !== true &&
+          normalizeMatchStatus(match) !== "finished" &&
+          isFutureMatchStatus(match),
+      )
+      .map((match) => ({ match, kickoffTime: getKickoffTime(match) }))
+      .filter(({ kickoffTime }) => Number.isFinite(kickoffTime) && kickoffTime > currentTime)
+      .sort((first, second) => first.kickoffTime - second.kickoffTime)
+      .map(({ match }) => match),
+    [currentTime, matches],
   );
+
+  const upcomingOnlyMatches = futureMatches;
 
   const pastOnlyMatches = useMemo(
-    () => matches.filter((match) => normalizeMatchStatus(match) === "finished"),
+    () => matches
+      .filter((match) => match.is_finished === true)
+      .map((match) => ({ match, kickoffTime: getKickoffTime(match) }))
+      .sort((first, second) => second.kickoffTime - first.kickoffTime)
+      .map(({ match }) => match),
     [matches],
+  );
+
+  const upcomingMatchGroups = useMemo(
+    () => groupMatchesByDate(upcomingOnlyMatches, lang),
+    [lang, upcomingOnlyMatches],
+  );
+
+  const pastMatchGroups = useMemo(
+    () => groupMatchesByDate(pastOnlyMatches, lang),
+    [lang, pastOnlyMatches],
   );
 
   useEffect(() => {
@@ -626,12 +935,35 @@ function App() {
       });
     };
 
-    const loadMatches = () => fetch(`${API_BASE_URL}/matches`)
-      .then((response) => response.json())
-      .then((data) => updateMatches(data.matches || []))
-      .catch((error) => console.error("Failed to load matches:", error));
+    const loadMatches = (isInitialLoad = false) => {
+      if (isInitialLoad) {
+        setIsLoadingMatches(true);
+        setMatchesError("");
+      }
 
-    loadMatches();
+      return fetch(`${API_BASE_URL}/matches`)
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error(`Matches request failed: ${response.status}`);
+          }
+
+          return response.json();
+        })
+        .then((data) => {
+          setCurrentTime(Date.now());
+          updateMatches(Array.isArray(data.matches) ? data.matches : []);
+          setMatchesError("");
+        })
+        .catch((error) => {
+          console.error("Failed to load matches:", error);
+          setMatchesError(t.matchesError);
+        })
+        .finally(() => {
+          if (isInitialLoad) setIsLoadingMatches(false);
+        });
+    };
+
+    loadMatches(true);
     const matchRefresh = window.setInterval(loadMatches, 30000);
 
     return () => {
@@ -639,38 +971,190 @@ function App() {
       scoreTimeouts.forEach((timeout) => window.clearTimeout(timeout));
       scoreTimeouts.clear();
     };
+  }, [t.matchesError]);
+
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/teams`)
+      .then((response) => {
+        if (!response.ok) throw new Error(`Teams request failed: ${response.status}`);
+        return response.json();
+      })
+      .then((data) => setTeams(Array.isArray(data.teams) ? data.teams : []))
+      .catch((error) => console.error("Failed to load teams:", error));
   }, []);
+
+  useEffect(() => {
+    if (!telegramId) return;
+
+    fetch(`${API_BASE_URL}/user`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        telegram_id: telegramId,
+        first_name: telegramUser?.first_name || "",
+        last_name: telegramUser?.last_name || "",
+        username: telegramUser?.username || "",
+        language_code: telegramUser?.language_code || "",
+      }),
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error(`User request failed: ${response.status}`);
+        return response.json();
+      })
+      .then((data) => setIsUserSaved(Boolean(data.success)))
+      .catch((error) => {
+        console.error("Failed to save Telegram user:", error);
+        setIsUserSaved(false);
+      });
+
+    fetch(`${API_BASE_URL}/favorite-teams/${telegramId}`)
+      .then((response) => {
+        if (!response.ok) throw new Error(`Favorites request failed: ${response.status}`);
+        return response.json();
+      })
+      .then((data) => setFavoriteTeams(Array.isArray(data.favorite_teams) ? data.favorite_teams : []))
+      .catch((error) => console.error("Failed to load favorite teams:", error));
+
+    fetch(`${API_BASE_URL}/reminders/${telegramId}`)
+      .then((response) => {
+        if (!response.ok) throw new Error(`Reminders request failed: ${response.status}`);
+        return response.json();
+      })
+      .then((data) => setReminders(Array.isArray(data.reminders) ? data.reminders : []))
+      .catch((error) => console.error("Failed to load reminders:", error));
+  }, [telegramId, telegramUser]);
 
   const toggleLang = () => {
     setLang((current) => (current === "fa" ? "en" : "fa"));
   };
 
-  const addFavoriteTeam = (teamId) => {
-    setFavoriteTeams((current) => current.filter((team) => team.id !== teamId));
-    setFavoriteMessage(t.unavailable);
+  const addFavoriteTeam = (team) => {
+    if (!telegramId) {
+      setFavoriteMessage(t.unavailable);
+      return;
+    }
+
+    const displayName = getTeamDisplayName(team);
+
+    fetch(`${API_BASE_URL}/favorite-team`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        telegram_id: telegramId,
+        ...teamPayload(team),
+      }),
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error(`Favorite request failed: ${response.status}`);
+        return response.json();
+      })
+      .then((data) => {
+        setFavoriteTeams(Array.isArray(data.favorite_teams) ? data.favorite_teams : []);
+        setFavoriteMessage(`${displayName} ${t.addedFavorite}`);
+      })
+      .catch((error) => {
+        console.error("Failed to add favorite team:", error);
+        setFavoriteMessage(t.unavailable);
+      });
   };
 
-  const removeFavoriteTeam = (teamId) => {
-    setFavoriteTeams((current) => current.filter((team) => team.id !== teamId));
-    setFavoriteMessage(t.unavailable);
+  const removeFavoriteTeam = (team) => {
+    if (!telegramId) {
+      setFavoriteMessage(t.unavailable);
+      return;
+    }
+
+    const teamId = typeof team === "object" ? team.id : team;
+    const existingTeam = favoriteTeams.find((item) => String(item.id) === String(teamId)) || team;
+    const displayName = typeof existingTeam === "object" ? getTeamDisplayName(existingTeam) : "";
+
+    fetch(`${API_BASE_URL}/favorite-team`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        telegram_id: telegramId,
+        team_id: teamId,
+        team_key: typeof existingTeam === "object"
+          ? existingTeam.team_key || normalizeTeamKey(existingTeam.name_en || existingTeam.name_fa || existingTeam.team_name || existingTeam.id)
+          : "",
+      }),
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error(`Favorite delete failed: ${response.status}`);
+        return response.json();
+      })
+      .then((data) => {
+        setFavoriteTeams(Array.isArray(data.favorite_teams) ? data.favorite_teams : []);
+        setFavoriteMessage(`${displayName} ${t.removedFavorite}`.trim());
+      })
+      .catch((error) => {
+        console.error("Failed to remove favorite team:", error);
+        setFavoriteMessage(t.unavailable);
+      });
   };
 
-  const toggleFavoriteTeam = (teamId) => {
-    if (favoriteTeamIds.has(teamId)) {
-      removeFavoriteTeam(teamId);
+  const toggleFavoriteTeam = (team) => {
+    if (isTeamFavorite(team)) {
+      removeFavoriteTeam(team);
     } else {
-      addFavoriteTeam(teamId);
+      addFavoriteTeam(team);
     }
   };
 
   const addReminder = (matchId) => {
-    setReminders((current) => current.filter((match) => match.id !== matchId));
-    setReminderMessage(t.unavailable);
+    if (!telegramId) {
+      setReminderMessage(t.unavailable);
+      return;
+    }
+
+    fetch(`${API_BASE_URL}/reminder`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        telegram_id: telegramId,
+        match_id: matchId,
+      }),
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error(`Reminder request failed: ${response.status}`);
+        return response.json();
+      })
+      .then((data) => {
+        setReminders(Array.isArray(data.reminders) ? data.reminders : []);
+        setReminderMessage(t.addedReminder);
+      })
+      .catch((error) => {
+        console.error("Failed to add reminder:", error);
+        setReminderMessage(t.unavailable);
+      });
   };
 
   const removeReminder = (matchId) => {
-    setReminders((current) => current.filter((match) => match.id !== matchId));
-    setReminderMessage(t.unavailable);
+    if (!telegramId) {
+      setReminderMessage(t.unavailable);
+      return;
+    }
+
+    fetch(`${API_BASE_URL}/reminder`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        telegram_id: telegramId,
+        match_id: matchId,
+      }),
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error(`Reminder delete failed: ${response.status}`);
+        return response.json();
+      })
+      .then((data) => {
+        setReminders(Array.isArray(data.reminders) ? data.reminders : []);
+        setReminderMessage(t.removedReminder);
+      })
+      .catch((error) => {
+        console.error("Failed to remove reminder:", error);
+        setReminderMessage(t.unavailable);
+      });
   };
 
   const toggleReminder = (matchId) => {
@@ -681,29 +1165,43 @@ function App() {
     }
   };
 
-  const handleMatchClick = (match) => {
+  const handleMatchDetailsClick = (match) => {
     if (!match?.id) return;
 
     setSelectedMatchId((currentId) => (currentId === match.id ? null : match.id));
 
     if (matchEventsById[match.id]) return;
 
+    setEventUnavailableMatchIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+      nextIds.delete(match.id);
+      return nextIds;
+    });
     setLoadingEventsId(match.id);
     fetch(`${API_BASE_URL}/match/${match.id}/events`)
-      .then((response) => response.json())
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Events request failed: ${response.status}`);
+        }
+
+        return response.json();
+      })
       .then((data) => {
         setMatchEventsById((currentEvents) => ({
           ...currentEvents,
           [match.id]: Array.isArray(data.events) ? data.events : [],
         }));
       })
-      .catch((error) => console.error("Failed to load match events:", error))
+      .catch((error) => {
+        console.error("Failed to load match events:", error);
+        setEventUnavailableMatchIds((currentIds) => new Set(currentIds).add(match.id));
+      })
       .finally(() => setLoadingEventsId(null));
   };
 
   const getMatchTeams = (match) => ({
-    homeTeam: teamsByName.get(match.home_en),
-    awayTeam: teamsByName.get(match.away_en),
+    homeTeam: teamsByName.get(match.home_en) || teamsByName.get(match.home_fa) || teamFromMatch(match, "home"),
+    awayTeam: teamsByName.get(match.away_en) || teamsByName.get(match.away_fa) || teamFromMatch(match, "away"),
   });
 
   const profileName = telegramUser
@@ -714,12 +1212,22 @@ function App() {
     ? `@${telegramUser.username}`
     : t.noUsername;
 
-  const nextMatch = upcomingOnlyMatches[0];
+  const nextKickoffTime = upcomingOnlyMatches.reduce(
+    (earliestKickoff, match) => Math.min(earliestKickoff, getKickoffTime(match)),
+    Number.POSITIVE_INFINITY,
+  );
+  const nextMatchesAtSameTime = Number.isFinite(nextKickoffTime)
+    ? upcomingOnlyMatches.filter((match) => Math.abs(getKickoffTime(match) - nextKickoffTime) <= 60000)
+    : [];
   const hasLiveMatches = liveMatches.length > 0;
-  const homeFeaturedMatches = hasLiveMatches ? liveMatches : nextMatch ? [nextMatch] : [];
-  const featuredMatch = homeFeaturedMatches[0];
-  const homeFeaturedTitle = hasLiveMatches ? t.liveMatches : t.nextMatch;
+  const homeFeaturedMatches = hasLiveMatches ? liveMatches : nextMatchesAtSameTime;
+  const homeFeaturedTitle = hasLiveMatches
+    ? t.liveMatches
+    : nextMatchesAtSameTime.length > 1
+      ? t.nextMatchesTitle
+      : t.nextMatch;
   const homeFeaturedTab = hasLiveMatches ? "live" : "upcoming";
+  const homeEmptyMessage = hasLiveMatches ? t.noLiveMatches : t.noUpcomingMatches;
 
   const renderMatchCard = (match, options = {}) => {
     const { homeTeam, awayTeam } = getMatchTeams(match);
@@ -735,11 +1243,13 @@ function App() {
         homeTeam={homeTeam}
         awayTeam={awayTeam}
         favoriteTeamIds={favoriteTeamIds}
+        favoriteTeamKeys={favoriteTeamKeys}
         onFavoriteToggle={toggleFavoriteTeam}
-        onMatchClick={handleMatchClick}
+        onDetailsClick={handleMatchDetailsClick}
         isExpanded={selectedMatchId === match.id}
         events={matchEventsById[match.id] || []}
         isLoadingEvents={loadingEventsId === match.id}
+        eventsUnavailable={eventUnavailableMatchIds.has(match.id)}
         isScoreChanged={scoreChangedMatchIds.has(match.id)}
         {...options}
       />
@@ -783,26 +1293,53 @@ function App() {
 
         <div className="hero-card">
           <span>{homeFeaturedTitle}</span>
-          {featuredMatch ? (
-            <div className="hero-next-match">
-              <strong className="hero-next-team">
-                <TeamFlag flagEmoji={featuredMatch.home_flag} teamName={featuredMatch.home_en} />
-                {getLocalizedTeamName(featuredMatch, "home", lang)}
-              </strong>
-              <b>
-                {hasLiveMatches ? getMatchScore(featuredMatch) || "0 - 0" : t.vs}
-              </b>
-              <strong className="hero-next-team">
-                <TeamFlag flagEmoji={featuredMatch.away_flag} teamName={featuredMatch.away_en} />
-                {getLocalizedTeamName(featuredMatch, "away", lang)}
-              </strong>
+          {homeFeaturedMatches.length > 0 ? (
+            <div className="hero-next-list">
+              {homeFeaturedMatches.map((match) => {
+                const matchDateTime = formatTehranMatchDateTime(match, lang);
+                const { homeTeam, awayTeam } = getMatchTeams(match);
+                const isHomeFavorite = isTeamFavorite(homeTeam);
+                const isAwayFavorite = isTeamFavorite(awayTeam);
+
+                return (
+                  <div className="hero-next-item" key={match.id}>
+                    <div className="hero-next-match">
+                      <strong className="hero-next-team">
+                        <TeamFlag flagEmoji={match.home_flag} teamName={match.home_en} />
+                        {getLocalizedTeamName(match, "home", lang)}
+                        <button
+                          className={`favorite-star ${isHomeFavorite ? "active" : ""}`}
+                          aria-label={isHomeFavorite ? t.removeFavorite : t.addFavorite}
+                          onClick={() => toggleFavoriteTeam(homeTeam)}
+                        >
+                          {isHomeFavorite ? "\u2605" : "\u2606"}
+                        </button>
+                      </strong>
+                      <b>
+                        {hasLiveMatches ? getMatchScore(match) || "0 - 0" : t.vs}
+                      </b>
+                      <strong className="hero-next-team">
+                        <TeamFlag flagEmoji={match.away_flag} teamName={match.away_en} />
+                        {getLocalizedTeamName(match, "away", lang)}
+                        <button
+                          className={`favorite-star ${isAwayFavorite ? "active" : ""}`}
+                          aria-label={isAwayFavorite ? t.removeFavorite : t.addFavorite}
+                          onClick={() => toggleFavoriteTeam(awayTeam)}
+                        >
+                          {isAwayFavorite ? "\u2605" : "\u2606"}
+                        </button>
+                      </strong>
+                    </div>
+                    <small>{matchDateTime.compact}</small>
+                  </div>
+                );
+              })}
             </div>
           ) : (
-            <strong>{t.loadingMatches}</strong>
+            <strong>
+              {isLoadingMatches ? t.loadingMatches : matchesError || t.noUpcomingMatches}
+            </strong>
           )}
-          <small>
-            {featuredMatch ? `${featuredMatch.date_iran} - ${featuredMatch.time_iran}` : ""}
-          </small>
         </div>
       </section>
 
@@ -834,7 +1371,11 @@ function App() {
             </div>
 
             <div className="matches">
-              {homeFeaturedMatches.length === 0 && <p>{t.loadingMatches}</p>}
+              {isLoadingMatches && <p>{t.loadingMatches}</p>}
+              {!isLoadingMatches && matchesError && <p>{matchesError}</p>}
+              {!isLoadingMatches && !matchesError && homeFeaturedMatches.length === 0 && (
+                <p>{homeEmptyMessage}</p>
+              )}
               {homeFeaturedMatches.map((match) =>
                 renderMatchCard(match, { showReminder: !hasLiveMatches }),
               )}
@@ -854,7 +1395,11 @@ function App() {
           </div>
 
           <div className="matches">
-            {liveMatches.length === 0 && <p>{t.loadingMatches}</p>}
+            {isLoadingMatches && <p>{t.loadingMatches}</p>}
+            {!isLoadingMatches && matchesError && <p>{matchesError}</p>}
+            {!isLoadingMatches && !matchesError && liveMatches.length === 0 && (
+              <p>{t.noLiveMatches}</p>
+            )}
             {liveMatches.map((match) => renderMatchCard(match, { showReminder: false }))}
           </div>
         </section>
@@ -867,8 +1412,19 @@ function App() {
           </div>
 
           <div className="matches">
-            {upcomingOnlyMatches.length === 0 && <p>{t.loadingMatches}</p>}
-            {upcomingOnlyMatches.map((match) => renderMatchCard(match))}
+            {isLoadingMatches && <p>{t.loadingMatches}</p>}
+            {!isLoadingMatches && matchesError && <p>{matchesError}</p>}
+            {!isLoadingMatches && !matchesError && upcomingOnlyMatches.length === 0 && (
+              <p>{t.noUpcomingMatches}</p>
+            )}
+            {upcomingMatchGroups.map((group) => (
+              <section className="match-day-group" key={group.dateKey}>
+                <h3 className="match-day-header">{group.label}</h3>
+                <div className="match-day-list">
+                  {group.matches.map((match) => renderMatchCard(match))}
+                </div>
+              </section>
+            ))}
           </div>
 
           {(reminderMessage || favoriteMessage) && (
@@ -884,8 +1440,19 @@ function App() {
           </div>
 
           <div className="matches">
-            {pastOnlyMatches.length === 0 && <p>{t.loadingMatches}</p>}
-            {pastOnlyMatches.map((match) => renderMatchCard(match, { showReminder: false }))}
+            {isLoadingMatches && <p>{t.loadingMatches}</p>}
+            {!isLoadingMatches && matchesError && <p>{matchesError}</p>}
+            {!isLoadingMatches && !matchesError && pastOnlyMatches.length === 0 && (
+              <p>{t.noPastMatches}</p>
+            )}
+            {pastMatchGroups.map((group) => (
+              <section className="match-day-group" key={group.dateKey}>
+                <h3 className="match-day-header">{group.label}</h3>
+                <div className="match-day-list">
+                  {group.matches.map((match) => renderMatchCard(match, { showReminder: false }))}
+                </div>
+              </section>
+            ))}
           </div>
         </section>
       )}
@@ -897,7 +1464,7 @@ function App() {
           </div>
 
           <div className="news-list">
-            {newsItems.length === 0 && <p>{t.loadingNews}</p>}
+            {newsItems.length === 0 && <p>{t.noNews}</p>}
             {newsItems.map((item) => (
               <NewsCard key={item.id} item={item} lang={lang} />
             ))}
@@ -908,20 +1475,47 @@ function App() {
       {activeTab === "favorites" && (
         <section className="section">
           <div className="section-header">
-            <h2>{t.chooseFavorite}</h2>
+            <h2>{t.favoriteTeams}</h2>
           </div>
 
           {favoriteMessage && <p className="status-message">{favoriteMessage}</p>}
 
+          <div className="profile-list favorites-panel">
+            <div className="profile-list-header">
+              <h3>{t.favoriteTeams}</h3>
+              <span>{favoriteTeams.length}</span>
+            </div>
+
+            {favoriteTeams.length === 0 && <p>{t.noFavorites}</p>}
+            {favoriteTeams.map((team) => (
+              <div className="profile-item" key={team.id}>
+                <span>{team.emoji || team.flag || "\u26bd"}</span>
+                <div className="profile-item-text">
+                  <strong>{getTeamDisplayName(team)}</strong>
+                </div>
+                <button
+                  className="chip-btn profile-remove-btn"
+                  onClick={() => removeFavoriteTeam(team)}
+                >
+                  {t.removeFavorite}
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="section-header inline-section-header">
+            <h2>{t.chooseFavorite}</h2>
+          </div>
+
           <div className="news-list">
-            {teams.length === 0 && <p>{t.loadingTeams}</p>}
+            {teams.length === 0 && <p>{t.noFavorites}</p>}
             {teams.map((team) => (
               <TeamCard
                 key={team.id}
                 team={team}
                 lang={lang}
                 t={t}
-                isFavorite={favoriteTeamIds.has(team.id)}
+                isFavorite={isTeamFavorite(team)}
                 onToggle={toggleFavoriteTeam}
               />
             ))}
@@ -976,13 +1570,13 @@ function App() {
               {favoriteTeams.length === 0 && <p>{t.noFavorites}</p>}
               {favoriteTeams.map((team) => (
                 <div className="profile-item" key={team.id}>
-                  <span>{team.emoji}</span>
+                  <span>{team.emoji || team.flag || "\u26bd"}</span>
                   <div className="profile-item-text">
-                    <strong>{lang === "fa" ? team.name_fa : team.name_en}</strong>
+                    <strong>{getTeamDisplayName(team)}</strong>
                   </div>
                   <button
                     className="chip-btn profile-remove-btn"
-                    onClick={() => removeFavoriteTeam(team.id)}
+                    onClick={() => removeFavoriteTeam(team)}
                   >
                     {t.removeFavorite}
                   </button>
@@ -997,30 +1591,32 @@ function App() {
               </div>
 
               {reminders.length === 0 && <p>{t.noReminders}</p>}
-              {reminders.map((match) => (
-                <div className="profile-item reminder-item" key={match.id}>
-                  <TeamFlag flagEmoji={match.home_flag} teamName={match.home_en} />
-                  <div className="profile-item-text">
-                    <strong>
-                      <span className="profile-reminder-match">
-                        {match.home_en}
-                        <span>{t.vs}</span>
-                        <TeamFlag flagEmoji={match.away_flag} teamName={match.away_en} />
-                        {match.away_en}
-                      </span>
-                    </strong>
-                    <small>
-                      {match.date_iran} - {match.time_iran}
-                    </small>
+              {reminders.map((match) => {
+                const reminderDateTime = formatTehranMatchDateTime(match, lang);
+
+                return (
+                  <div className="profile-item reminder-item" key={match.id}>
+                    <TeamFlag flagEmoji={match.home_flag} teamName={match.home_en} />
+                    <div className="profile-item-text">
+                      <strong>
+                        <span className="profile-reminder-match">
+                          {match.home_en}
+                          <span>{t.vs}</span>
+                          <TeamFlag flagEmoji={match.away_flag} teamName={match.away_en} />
+                          {match.away_en}
+                        </span>
+                      </strong>
+                      <small>{reminderDateTime.compact}</small>
+                    </div>
+                    <button
+                      className="chip-btn profile-remove-btn"
+                      onClick={() => removeReminder(match.id)}
+                    >
+                      {t.cancelReminder}
+                    </button>
                   </div>
-                  <button
-                    className="chip-btn profile-remove-btn"
-                    onClick={() => removeReminder(match.id)}
-                  >
-                    {t.cancelReminder}
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </article>
         </section>
