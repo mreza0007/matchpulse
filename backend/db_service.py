@@ -82,6 +82,8 @@ def init_db():
         """
     )
 
+    ensure_live_notification_tables(conn)
+
     conn.commit()
     conn.close()
 
@@ -97,7 +99,12 @@ def ensure_column(cursor, table_name, column_name, column_type):
 
 
 def normalize_team_key(value):
-    return "".join(str(value or "").strip().lower().split())
+    return (
+        "".join(str(value or "").strip().lower().split())
+        .replace("\u200c", "")
+        .replace("-", "")
+        .replace("_", "")
+    )
 
 
 def team_key_from_data(team):
@@ -579,3 +586,177 @@ def get_all_match_score_overrides_from_db():
         }
 
     return overrides
+
+
+def ensure_live_notification_tables(conn=None):
+    owns_connection = conn is None
+
+    if owns_connection:
+        conn = get_connection()
+
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS live_notification_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id INTEGER NOT NULL,
+            match_id INTEGER NOT NULL,
+            notification_type TEXT NOT NULL,
+            event_key TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(telegram_id, match_id, notification_type, event_key)
+        )
+        """
+    )
+
+    if owns_connection:
+        conn.commit()
+        conn.close()
+
+
+def match_id_value(match):
+    return match.get("id") or match.get("internal_match_id") or match.get("match_id")
+
+
+def match_team_keys(match, side):
+    values = [
+        match.get(f"{side}_team_id"),
+        match.get(f"{side}_id"),
+        match.get(f"{side}_en"),
+        match.get(f"{side}_fa"),
+        match.get(f"{side}_name"),
+        match.get(f"{side}_team"),
+        match.get(f"{side}_team_name"),
+        match.get(f"{side}_team_name_en"),
+        match.get(f"{side}_team_name_fa"),
+    ]
+
+    return {
+        normalize_team_key(value)
+        for value in values
+        if value is not None and str(value).strip()
+    }
+
+
+def favorite_team_keys(team):
+    prepared = prepare_favorite_team(team)
+    values = [
+        prepared.get("id"),
+        prepared.get("team_id"),
+        prepared.get("team_key"),
+        prepared.get("team_name"),
+        prepared.get("name"),
+        prepared.get("name_en"),
+        prepared.get("name_fa"),
+        prepared.get("short_name"),
+        prepared.get("fifa_code"),
+    ]
+
+    return {
+        normalize_team_key(value)
+        for value in values
+        if value is not None and str(value).strip()
+    }
+
+
+def favorite_team_matches_match(team, match):
+    favorite_keys = favorite_team_keys(team)
+
+    if not favorite_keys:
+        return False
+
+    return bool(
+        favorite_keys.intersection(match_team_keys(match, "home"))
+        or favorite_keys.intersection(match_team_keys(match, "away"))
+    )
+
+
+def get_relevant_users_for_match(match):
+    match_id = match_id_value(match)
+    relevant_users = set()
+
+    if match_id is None:
+        return []
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT telegram_id
+        FROM reminders
+        WHERE match_id = ?
+        """,
+        (match_id,),
+    )
+
+    relevant_users.update(row[0] for row in cursor.fetchall())
+
+    cursor.execute(
+        """
+        SELECT telegram_id, team_data
+        FROM favorite_teams
+        """
+    )
+
+    favorite_rows = cursor.fetchall()
+    conn.close()
+
+    for telegram_id, team_data in favorite_rows:
+        try:
+            team = json.loads(team_data)
+        except (TypeError, json.JSONDecodeError):
+            continue
+
+        if favorite_team_matches_match(team, match):
+            relevant_users.add(telegram_id)
+
+    return sorted(relevant_users)
+
+
+def has_live_notification_been_sent(telegram_id, match_id, notification_type, event_key):
+    ensure_live_notification_tables()
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT 1
+        FROM live_notification_log
+        WHERE telegram_id = ?
+          AND match_id = ?
+          AND notification_type = ?
+          AND event_key = ?
+        LIMIT 1
+        """,
+        (telegram_id, match_id, notification_type, event_key),
+    )
+
+    row = cursor.fetchone()
+    conn.close()
+    return row is not None
+
+
+def mark_live_notification_sent(telegram_id, match_id, notification_type, event_key):
+    ensure_live_notification_tables()
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        INSERT OR IGNORE INTO live_notification_log (
+            telegram_id,
+            match_id,
+            notification_type,
+            event_key,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """,
+        (telegram_id, match_id, notification_type, event_key),
+    )
+
+    inserted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return inserted

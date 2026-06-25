@@ -12,15 +12,6 @@ import requests
 
 REFRESH_INTERVAL_SECONDS = 10
 DEFAULT_TIMEOUT_SECONDS = 10
-VARZESH3_WORLD_CUP_LEAGUE_ID = 28
-VARZESH3_LIVESCORE_BASE_URL = "https://web-api.varzesh3.com/v2.0/livescore"
-VARZESH3_API_BASE_URL = "https://web-api.varzesh3.com/v2.0"
-VARZESH3_PROVIDER_CACHE_TTL_SECONDS = 5 * 60
-VARZESH3_PROVIDER_OFFSETS = tuple(
-    int(offset.strip())
-    for offset in os.getenv("VARZESH3_PROVIDER_OFFSETS", "-2,-1,0,1").split(",")
-    if offset.strip()
-)
 PROVIDER_MATCH_TOLERANCE_SECONDS = 18 * 60 * 60
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 VARZESH3_MATCH_MAP_PATH = DATA_DIR / "varzesh3-match-map.json"
@@ -74,10 +65,6 @@ _cache = {
     "matches": [],
     "events": {},
     "last_refresh": None,
-}
-_provider_match_cache = {
-    "matches": [],
-    "last_refresh": 0,
 }
 _persistent_match_map_cache = None
 _poller_started = False
@@ -150,7 +137,11 @@ def persist_external_match_id(match_id, external_match_id):
 
 
 def get_wrapper_base_url():
-    return os.getenv("WORLDCUP_WRAPPER_URL", "").strip()
+    return (
+        os.getenv("WORLDCUP_API_URL")
+        or os.getenv("WORLDCUP_WRAPPER_URL")
+        or "http://127.0.0.1:3050"
+    ).strip()
 
 
 def get_timeout_seconds():
@@ -651,76 +642,6 @@ def provider_raw_status(provider_match):
     }
 
 
-def fetch_varzesh3_provider_matches(force=False):
-    now = time.time()
-
-    if (
-        not force
-        and _provider_match_cache["matches"]
-        and now - _provider_match_cache["last_refresh"] < VARZESH3_PROVIDER_CACHE_TTL_SECONDS
-    ):
-        return _provider_match_cache["matches"]
-
-    matches_by_id = {}
-
-    urls = []
-
-    for path in ("/api/matches", "/matches"):
-        urls.append(f"{VARZESH3_API_BASE_URL}{path}")
-
-    for offset in VARZESH3_PROVIDER_OFFSETS:
-        urls.append(
-            f"{VARZESH3_LIVESCORE_BASE_URL}/today"
-            if offset == 0
-            else f"{VARZESH3_LIVESCORE_BASE_URL}/{offset}"
-        )
-
-    for url in urls:
-
-        try:
-            response = requests.get(
-                url,
-                timeout=get_timeout_seconds(),
-                headers={"User-Agent": "MatchPulse/1.0"},
-            )
-            response.raise_for_status()
-            payload = response.json()
-        except Exception as error:
-            warn(f"[WORLDCUP_EVENT_ID_RESOLVE] provider_list_failed url={url} error={error}")
-            continue
-
-        provider_groups = payload if isinstance(payload, list) else payload_list(payload, ("matches", "data", "items", "results"))
-
-        for league in provider_groups if isinstance(provider_groups, list) else []:
-            league_matches = []
-
-            if isinstance(league, dict) and league.get("id") == VARZESH3_WORLD_CUP_LEAGUE_ID:
-                if isinstance(league.get("matches"), list):
-                    league_matches.extend(league.get("matches"))
-
-                for date_group in league.get("dates") or []:
-                    if isinstance(date_group, dict) and isinstance(date_group.get("matches"), list):
-                        league_matches.extend(date_group.get("matches"))
-            elif isinstance(league, dict):
-                league_id = league.get("leagueId") or league.get("league_id") or league.get("competitionId")
-                if league_id not in {VARZESH3_WORLD_CUP_LEAGUE_ID, str(VARZESH3_WORLD_CUP_LEAGUE_ID)}:
-                    continue
-                league_matches.append(league)
-
-            for provider_match in league_matches:
-                provider_id = str(provider_match.get("id") or "")
-
-                if provider_id:
-                    matches_by_id[provider_id] = provider_match
-
-    provider_matches = list(matches_by_id.values())
-    _provider_match_cache["matches"] = provider_matches
-    _provider_match_cache["last_refresh"] = now
-    warn(f"[WORLDCUP_EVENT_ID_RESOLVE] provider_list_count={len(provider_matches)}")
-
-    return provider_matches
-
-
 def resolve_provider_match_for_local_match(match, provider_matches=None):
     existing = match.get("external_match_id") or match.get("raw_provider_match_id")
     match_id = match.get("id") or match.get("internal_match_id")
@@ -748,7 +669,7 @@ def resolve_provider_match_for_local_match(match, provider_matches=None):
         )
         return persistent_external, "persistent_map", None
 
-    provider_matches = provider_matches if provider_matches is not None else fetch_varzesh3_provider_matches()
+    provider_matches = provider_matches if provider_matches is not None else []
     local_home_names = local_team_names(match, "home")
     local_away_names = local_team_names(match, "away")
     kickoff = parse_match_datetime(match)
@@ -1392,44 +1313,6 @@ def normalize_provider_event(event, index):
     }
 
 
-def fetch_events_from_varzesh3_provider(external_match_id):
-    if not external_match_id:
-        return []
-
-    url = f"{VARZESH3_LIVESCORE_BASE_URL}/football/matches/{external_match_id}/events"
-
-    try:
-        response = requests.get(
-            url,
-            timeout=get_timeout_seconds(),
-            headers={"User-Agent": "MatchPulse/1.0"},
-        )
-        response.raise_for_status()
-        raw_events = response.json()
-    except Exception as error:
-        warn(
-            "Direct provider events failed: "
-            f"external_match_id={external_match_id}, "
-            f"url={url}, "
-            f"error={error}"
-        )
-        return []
-
-    normalized_events = normalize_events(
-        [
-            normalize_provider_event(event, index)
-            for index, event in enumerate(raw_events if isinstance(raw_events, list) else [])
-        ]
-    )
-    warn(
-        "Direct provider events response: "
-        f"external_match_id={external_match_id}, "
-        f"raw_event_count={len(raw_events) if isinstance(raw_events, list) else 0}, "
-        f"normalized_event_count={len(normalized_events)}"
-    )
-    return normalized_events
-
-
 def count_goal_events_by_side(events):
     score = {"home": 0, "away": 0}
 
@@ -1450,22 +1333,13 @@ def count_goal_events_by_side(events):
 def derive_score_from_provider_events(match, match_id):
     candidate_ids = []
 
-    for candidate_id in (match_id, match.get("external_match_id"), match.get("raw_provider_match_id")):
+    for candidate_id in (match_id,):
         if candidate_id is not None and candidate_id != "" and candidate_id not in candidate_ids:
             candidate_ids.append(candidate_id)
 
     for candidate_id in candidate_ids:
         payload = fetch_json(f"/match/{candidate_id}/events")
         events = normalize_events(raw_events_from_payload(payload))
-        home_score, away_score = count_goal_events_by_side(events)
-
-        if home_score or away_score:
-            return home_score, away_score
-
-    external_id = match.get("external_match_id") or match.get("raw_provider_match_id")
-
-    if external_id:
-        events = fetch_events_from_varzesh3_provider(external_id)
         home_score, away_score = count_goal_events_by_side(events)
 
         if home_score or away_score:
@@ -1829,7 +1703,7 @@ def fetch_matches_from_wrapper():
     stadiums_payload = fetch_json("/get/stadiums")
     team_lookup = build_lookup(payload_list(teams_payload, ("teams", "data", "results", "items")))
     stadium_lookup = build_lookup(payload_list(stadiums_payload, ("stadiums", "data", "results", "items")))
-    provider_matches = fetch_varzesh3_provider_matches()
+    provider_matches = []
 
     for match in games:
         enriched_match = enrich_game(match, team_lookup, stadium_lookup)
@@ -2074,7 +1948,7 @@ def fetch_single_game(match_id):
 
 
 def fetch_events_from_wrapper(match_id, metadata_match=None):
-    resolved_metadata = enrich_match_provider_identity(metadata_match or {"id": match_id})
+    resolved_metadata = enrich_match_provider_identity(metadata_match or {"id": match_id}, provider_matches=[])
     local_match_id = resolved_metadata.get("id") if resolved_metadata else match_id
     external_match_id = resolved_metadata.get("external_match_id") if resolved_metadata else None
     provider = resolved_metadata.get("provider") if resolved_metadata else None
@@ -2087,7 +1961,7 @@ def fetch_events_from_wrapper(match_id, metadata_match=None):
     )
     candidate_ids = []
 
-    for candidate_id in (external_match_id, local_match_id):
+    for candidate_id in (local_match_id,):
         if candidate_id is not None and candidate_id != "" and candidate_id not in candidate_ids:
             candidate_ids.append(candidate_id)
 
@@ -2097,23 +1971,6 @@ def fetch_events_from_wrapper(match_id, metadata_match=None):
         f"external_match_id={external_match_id or ''}, "
         f"provider={provider or ''}"
     )
-
-    if external_match_id:
-        direct_events = fetch_events_from_varzesh3_provider(external_match_id)
-
-        if direct_events:
-            warn(
-                "Events resolved via direct provider: "
-                f"internal_match_id={local_match_id}, "
-                f"external_match_id={external_match_id}, "
-                f"normalized_event_count={len(direct_events)}"
-            )
-            warn(
-                "[EVENT_RESOLVE_AUDIT] "
-                f"id={local_match_id} teams={teams} external={external_match_id} "
-                f"method={resolve_method or 'existing'} event_count={len(direct_events)}"
-            )
-            return direct_events
 
     for candidate_id in candidate_ids:
         event_path = f"/match/{candidate_id}/events"
@@ -2314,7 +2171,7 @@ def get_match_events_from_worldcup_wrapper(match_id):
     _external_match_id, metadata_match = external_match_id_for(normalized_match_id)
 
     if metadata_match:
-        metadata_match = enrich_match_provider_identity(metadata_match)
+        metadata_match = enrich_match_provider_identity(metadata_match, provider_matches=[])
 
     external_match_id = None
 

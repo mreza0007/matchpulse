@@ -7,8 +7,11 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from db_service import (
     get_all_favorite_teams_from_db,
     get_all_users,
+    get_relevant_users_for_match,
     has_sent_notification,
+    has_live_notification_been_sent,
     mark_notification_sent,
+    mark_live_notification_sent,
     mark_reminder_notified,
     normalize_team_key,
 )
@@ -31,7 +34,7 @@ scheduler_state = {
 
 
 def match_id(match):
-    return match.get("id") or match.get("internal_match_id") or match.get("external_match_id")
+    return match.get("id") or match.get("internal_match_id")
 
 
 def team_display(match, side):
@@ -111,7 +114,14 @@ def env_flag(name, default=False):
 
 
 def live_notifications_enabled():
-    return env_flag("ENABLE_LIVE_NOTIFICATIONS", False)
+    return env_flag("ENABLE_LIVE_NOTIFICATIONS", True)
+
+
+def live_notification_interval_seconds():
+    try:
+        return max(10, int(os.getenv("LIVE_NOTIFICATION_INTERVAL_SECONDS", "30")))
+    except (TypeError, ValueError):
+        return 30
 
 
 def notification_dry_run():
@@ -126,10 +136,6 @@ def send_once(bot_app, telegram_id, text, notification_key, match_id_value=None,
     if notification_dry_run():
         print(f"DRY RUN {log_label} to {telegram_id}: {notification_key}\n{text}")
         return False
-
-
-def notification_already_handled(notification_key):
-    return notification_key in scheduler_state["suppressed_notifications"] or has_sent_notification(notification_key)
 
     try:
         event_loop = scheduler_state.get("event_loop")
@@ -148,6 +154,10 @@ def notification_already_handled(notification_key):
     except Exception as error:
         print(f"Failed {log_label} for user_id={telegram_id}: {error}")
         return False
+
+
+def notification_already_handled(notification_key):
+    return notification_key in scheduler_state["suppressed_notifications"] or has_sent_notification(notification_key)
 
 
 def should_notify(match):
@@ -395,6 +405,316 @@ def load_events(match_id_value):
     return payload if isinstance(payload, list) else []
 
 
+def to_persian_digits(value):
+    return str(value).translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹"))
+
+
+def clean_value(value):
+    if value is None:
+        return ""
+
+    text = str(value).strip()
+    return "" if text.lower() in {"none", "null", "undefined", ""} else text
+
+
+def live_event_type(event):
+    return clean_value(event.get("normalized_type") or event.get("event_type") or event.get("type")).lower().replace("-", "_")
+
+
+def is_live_match(match):
+    return match.get("is_live") is True or normalized_status(match) in {
+        "live",
+        "in_progress",
+        "ongoing",
+        "1h",
+        "2h",
+        "ht",
+        "et",
+    }
+
+
+def match_is_recently_finished(match):
+    if not match_is_finished(match):
+        return False
+
+    kickoff = parse_kickoff(match)
+
+    if kickoff is None:
+        return False
+
+    try:
+        lookback_hours = max(1, int(os.getenv("LIVE_FINISHED_LOOKBACK_HOURS", "6")))
+    except (TypeError, ValueError):
+        lookback_hours = 6
+
+    now = datetime.now(timezone.utc)
+    return kickoff <= now <= kickoff + timedelta(hours=lookback_hours)
+
+
+def compact_score(match):
+    score = match.get("score") if isinstance(match.get("score"), dict) else {}
+    home_score = match.get("home_score")
+    away_score = match.get("away_score")
+
+    if home_score is None:
+        home_score = score.get("home")
+
+    if away_score is None:
+        away_score = score.get("away")
+
+    if home_score is None or away_score is None:
+        return ""
+
+    return f"{to_persian_digits(home_score)} - {to_persian_digits(away_score)}"
+
+
+def live_score_line(match):
+    home = team_display(match, "home")
+    away = team_display(match, "away")
+    score = compact_score(match)
+
+    if score:
+        return f"{home['name']} {score} {away['name']}"
+
+    return f"{home['name']} - {away['name']}"
+
+
+def event_minute(event):
+    minute = clean_value(event.get("display_minute") or event.get("raw_minute") or event.get("minute") or event.get("time"))
+    return to_persian_digits(minute) if minute else ""
+
+
+def event_player(event):
+    return clean_value(
+        event.get("player")
+        or event.get("player_name")
+        or event.get("playerName")
+        or event.get("scorer")
+        or event.get("goal_scorer")
+        or event.get("card_player")
+    )
+
+
+def event_score_token(match):
+    score = match.get("score") if isinstance(match.get("score"), dict) else {}
+    home_score = clean_value(match.get("home_score") if match.get("home_score") is not None else score.get("home"))
+    away_score = clean_value(match.get("away_score") if match.get("away_score") is not None else score.get("away"))
+    return f"{home_score}_{away_score}" if home_score or away_score else "unknown"
+
+
+def live_event_key(match, event, notification_type):
+    raw_id = clean_value(event.get("id") or event.get("event_id") or event.get("eventId"))
+
+    if raw_id:
+        return f"{notification_type}:event_{raw_id}"
+
+    side = scoring_side(event, match) or clean_value(event.get("team_side") or event.get("team") or event.get("side"))
+    team = team_display(match, side) if side in {"home", "away"} else {"key": normalize_team_key(side)}
+    player = normalize_team_key(event_player(event))
+    minute = clean_value(event.get("display_minute") or event.get("raw_minute") or event.get("minute") or event.get("time"))
+
+    return (
+        f"{notification_type}:match_{match_id(match)}:"
+        f"min_{normalize_team_key(minute) or 'unknown'}:"
+        f"team_{team['key'] or 'unknown'}:"
+        f"player_{player or 'unknown'}:"
+        f"score_{event_score_token(match)}"
+    )
+
+
+def build_match_started_message(match):
+    return "\n".join(
+        line
+        for line in (
+            "\U0001f534 \u0628\u0627\u0632\u06cc \u0634\u0631\u0648\u0639 \u0634\u062f",
+            live_score_line(match),
+        )
+        if clean_value(line)
+    )
+
+
+def build_goal_message(match, event):
+    side = scoring_side(event, match)
+    scoring_team = team_display(match, side) if side in {"home", "away"} else {"name": clean_value(event.get("team_name"))}
+    minute = event_minute(event)
+    player = event_player(event)
+    event_type = live_event_type(event)
+    title = "\u26bd \u06af\u0644!"
+
+    if event_type == "penalty_goal":
+        title = "\u26bd \u06af\u0644 \u067e\u0646\u0627\u0644\u062a\u06cc!"
+    elif event_type == "own_goal":
+        title = "\u26bd \u06af\u0644 \u0628\u0647 \u062e\u0648\u062f\u06cc!"
+
+    lines = [title]
+
+    if scoring_team.get("name") and minute:
+        lines.append(f"{scoring_team['name']} \u06af\u0644 \u0632\u062f - \u062f\u0642\u06cc\u0642\u0647 {minute}")
+    elif scoring_team.get("name"):
+        lines.append(f"{scoring_team['name']} \u06af\u0644 \u0632\u062f")
+    elif minute:
+        lines.append(f"\u062f\u0642\u06cc\u0642\u0647 {minute}")
+
+    if player:
+        lines.append(f"\u06af\u0644\u0632\u0646: {player}")
+
+    score = live_score_line(match)
+    if score:
+        lines.append(f"\u0646\u062a\u06cc\u062c\u0647: {score}")
+
+    return "\n".join(lines)
+
+
+def build_red_card_message(match, event):
+    side = scoring_side(event, match)
+    team = team_display(match, side) if side in {"home", "away"} else {"name": clean_value(event.get("team_name"))}
+    minute = event_minute(event)
+    player = event_player(event)
+    lines = ["\U0001f7e5 \u06a9\u0627\u0631\u062a \u0642\u0631\u0645\u0632"]
+
+    if team.get("name") and minute:
+        lines.append(f"\u0628\u0631\u0627\u06cc {team['name']} - \u062f\u0642\u06cc\u0642\u0647 {minute}")
+    elif team.get("name"):
+        lines.append(f"\u0628\u0631\u0627\u06cc {team['name']}")
+    elif minute:
+        lines.append(f"\u062f\u0642\u06cc\u0642\u0647 {minute}")
+
+    if player:
+        lines.append(f"\u0628\u0627\u0632\u06cc\u06a9\u0646: {player}")
+
+    return "\n".join(lines)
+
+
+def build_match_ended_message(match):
+    return "\n".join(
+        line
+        for line in (
+            "\u067e\u0627\u06cc\u0627\u0646 \u0628\u0627\u0632\u06cc",
+            live_score_line(match),
+        )
+        if clean_value(line)
+    )
+
+
+def send_live_notification_once(bot_app, telegram_id, match, notification_type, event_key, text):
+    match_id_value = match_id(match)
+
+    if match_id_value is None:
+        return False
+
+    if has_live_notification_been_sent(telegram_id, match_id_value, notification_type, event_key):
+        return False
+
+    if notification_dry_run():
+        print(
+            "DRY RUN live notification "
+            f"type={notification_type} user={telegram_id} match={match_id_value} key={event_key}\n{text}"
+        )
+        return False
+
+    try:
+        event_loop = scheduler_state.get("event_loop")
+
+        if event_loop is None or event_loop.is_closed():
+            raise RuntimeError("Telegram application event loop is not available.")
+
+        future = asyncio.run_coroutine_threadsafe(
+            send_telegram_message(bot_app, telegram_id, text),
+            event_loop,
+        )
+        future.result(timeout=30)
+        mark_live_notification_sent(telegram_id, match_id_value, notification_type, event_key)
+        print(
+            "Sent live notification "
+            f"type={notification_type} user={telegram_id} match={match_id_value} key={event_key}"
+        )
+        return True
+    except Exception as error:
+        print(
+            "Failed live notification "
+            f"type={notification_type} user={telegram_id} match={match_id_value} key={event_key}: {error}"
+        )
+        return False
+
+
+def notify_relevant_users(bot_app, match, notification_type, event_key, text):
+    for telegram_id in get_relevant_users_for_match(match):
+        send_live_notification_once(bot_app, telegram_id, match, notification_type, event_key, text)
+
+
+def check_live_match_notifications():
+    try:
+        check_live_match_notifications_once()
+    except Exception as error:
+        print(f"Scheduler check failed in check_live_match_notifications: {error}")
+
+
+def check_live_match_notifications_once():
+    if not live_notifications_enabled():
+        return
+
+    bot_app = scheduler_state["bot_app"]
+
+    if bot_app is None:
+        return
+
+    matches = load_matches()
+    live_matches = [match for match in matches if is_live_match(match)]
+    finished_matches = [match for match in matches if match_is_recently_finished(match)]
+
+    if not live_matches and not finished_matches:
+        return
+
+    for match in live_matches:
+        match_id_value = match_id(match)
+
+        if match_id_value is None:
+            continue
+
+        notify_relevant_users(
+            bot_app,
+            match,
+            "match_started",
+            "started",
+            build_match_started_message(match),
+        )
+
+        events = load_events(match_id_value)
+
+        for event in events:
+            event_type = live_event_type(event)
+
+            if event_type in {"goal", "penalty_goal", "own_goal"}:
+                notify_relevant_users(
+                    bot_app,
+                    match,
+                    "goal",
+                    live_event_key(match, event, "goal"),
+                    build_goal_message(match, event),
+                )
+
+            if event_type == "red_card":
+                notify_relevant_users(
+                    bot_app,
+                    match,
+                    "red_card",
+                    live_event_key(match, event, "red_card"),
+                    build_red_card_message(match, event),
+                )
+
+    for match in finished_matches:
+        if match_id(match) is None:
+            continue
+
+        notify_relevant_users(
+            bot_app,
+            match,
+            "match_ended",
+            "ended",
+            build_match_ended_message(match),
+        )
+
+
 def seed_existing_match_notification_state():
     if scheduler_state["seeded_existing_live_notifications"]:
         return
@@ -635,22 +955,6 @@ def check_all_notifications():
     except Exception as error:
         print(f"Scheduler check failed in check_manual_reminders: {error}")
 
-    if not live_notifications_enabled():
-        print("Live notifications disabled; skipping match start/finish/favorite event checks")
-        return
-
-    seed_existing_match_notification_state()
-
-    for check in (
-        check_match_start_notifications,
-        check_match_finished_notifications,
-        check_favorite_goal_notifications,
-    ):
-        try:
-            check()
-        except Exception as error:
-            print(f"Scheduler check failed in {check.__name__}: {error}")
-
 
 def start_scheduler(bot_app, reminders, favorite_teams, get_matches, get_events=None, event_loop=None):
     scheduler_state["bot_app"] = bot_app
@@ -667,6 +971,14 @@ def start_scheduler(bot_app, reminders, favorite_teams, get_matches, get_events=
             minutes=1,
             id="matchpulse_notifications",
             replace_existing=True,
+        )
+        scheduler.add_job(
+            check_live_match_notifications,
+            "interval",
+            seconds=live_notification_interval_seconds(),
+            id="matchpulse_live_notifications",
+            replace_existing=True,
+            max_instances=1,
         )
         scheduler.start()
         print("Scheduler started...")
