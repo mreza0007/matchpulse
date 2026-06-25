@@ -815,6 +815,23 @@ h1 {
   color: #8dffd5;
 }
 
+.event-row.penalty_goal .event-minute {
+  background: rgba(105, 255, 196, 0.14);
+  color: #8dffd5;
+}
+
+.event-row.own_goal .event-minute {
+  background: rgba(255, 184, 108, 0.14);
+  color: #ffd39a;
+}
+
+.event-row.var_disallowed_goal .event-minute,
+.event-row.disallowed_goal .event-minute,
+.event-row.penalty_missed .event-minute {
+  background: rgba(255, 112, 112, 0.14);
+  color: #ffb1b1;
+}
+
 .event-row.red_card .event-minute {
   background: rgba(255, 112, 112, 0.14);
   color: #ffb1b1;

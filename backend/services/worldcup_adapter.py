@@ -2,7 +2,9 @@ import os
 import re
 import threading
 import time
-from datetime import datetime, time as datetime_time
+import json
+from datetime import datetime, timedelta, time as datetime_time
+from pathlib import Path
 from urllib.parse import urljoin
 from zoneinfo import ZoneInfo
 
@@ -10,6 +12,32 @@ import requests
 
 REFRESH_INTERVAL_SECONDS = 10
 DEFAULT_TIMEOUT_SECONDS = 10
+VARZESH3_WORLD_CUP_LEAGUE_ID = 28
+VARZESH3_LIVESCORE_BASE_URL = "https://web-api.varzesh3.com/v2.0/livescore"
+VARZESH3_API_BASE_URL = "https://web-api.varzesh3.com/v2.0"
+VARZESH3_PROVIDER_CACHE_TTL_SECONDS = 5 * 60
+VARZESH3_PROVIDER_OFFSETS = tuple(
+    int(offset.strip())
+    for offset in os.getenv("VARZESH3_PROVIDER_OFFSETS", "-2,-1,0,1").split(",")
+    if offset.strip()
+)
+PROVIDER_MATCH_TOLERANCE_SECONDS = 18 * 60 * 60
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+VARZESH3_MATCH_MAP_PATH = DATA_DIR / "varzesh3-match-map.json"
+VARZESH_EVENT_TYPES = {
+    1: "goal",
+    2: "yellow_card",
+    3: "penalty_goal",
+    4: "substitution",
+    5: "var_disallowed_goal",
+    6: "var",
+    7: "own_goal",
+    8: "red_card",
+    9: "penalty_missed",
+    10: "injury",
+    11: "half_time",
+    12: "full_time",
+}
 TEHRAN_TZ = ZoneInfo("Asia/Tehran")
 UTC_TZ = ZoneInfo("UTC")
 SOURCE_TZ = ZoneInfo(os.getenv("WORLDCUP_SOURCE_TIMEZONE", "America/New_York"))
@@ -47,11 +75,78 @@ _cache = {
     "events": {},
     "last_refresh": None,
 }
+_provider_match_cache = {
+    "matches": [],
+    "last_refresh": 0,
+}
+_persistent_match_map_cache = None
 _poller_started = False
 
 
 def warn(message):
-    print(f"[WORLDCUP_WRAPPER] {message}")
+    text = f"[WORLDCUP_WRAPPER] {message}"
+    safe_text = text.encode("ascii", errors="backslashreplace").decode("ascii")
+    print(safe_text)
+
+
+def load_persistent_match_map():
+    global _persistent_match_map_cache
+
+    if _persistent_match_map_cache is not None:
+        return _persistent_match_map_cache
+
+    try:
+        if VARZESH3_MATCH_MAP_PATH.exists():
+            with VARZESH3_MATCH_MAP_PATH.open("r", encoding="utf-8") as file:
+                payload = json.load(file)
+        else:
+            payload = {}
+    except Exception as error:
+        warn(f"[EVENT_RESOLVE_AUDIT] persistent_map_load_failed path={VARZESH3_MATCH_MAP_PATH} error={error}")
+        payload = {}
+
+    mappings = payload.get("matches") if isinstance(payload, dict) else payload
+    if not isinstance(mappings, dict):
+        mappings = {}
+
+    _persistent_match_map_cache = {
+        str(match_id): str(external_id)
+        for match_id, external_id in mappings.items()
+        if external_id is not None and str(external_id).strip()
+    }
+    return _persistent_match_map_cache
+
+
+def save_persistent_match_map(mapping):
+    global _persistent_match_map_cache
+
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "description": "Persistent Varzesh3 external match ids keyed by MatchPulse internal match id.",
+            "matches": dict(sorted(mapping.items(), key=lambda item: int(item[0]) if str(item[0]).isdigit() else str(item[0]))),
+        }
+        with VARZESH3_MATCH_MAP_PATH.open("w", encoding="utf-8") as file:
+            json.dump(payload, file, ensure_ascii=False, indent=2)
+            file.write("\n")
+        _persistent_match_map_cache = payload["matches"]
+    except Exception as error:
+        warn(f"[EVENT_RESOLVE_AUDIT] persistent_map_save_failed path={VARZESH3_MATCH_MAP_PATH} error={error}")
+
+
+def persist_external_match_id(match_id, external_match_id):
+    if match_id is None or external_match_id is None or external_match_id == "":
+        return
+
+    mapping = load_persistent_match_map()
+    key = str(match_id)
+    value = str(external_match_id)
+
+    if mapping.get(key) == value:
+        return
+
+    mapping[key] = value
+    save_persistent_match_map(mapping)
 
 
 def get_wrapper_base_url():
@@ -441,6 +536,289 @@ def parse_match_datetime(match):
     return local_dt.astimezone(UTC_TZ)
 
 
+def normalize_match_name(value):
+    text = repair_text(value) or ""
+    text = normalize_digits(text).strip().lower()
+    replacements = {
+        "\u064a": "\u06cc",
+        "\u0643": "\u06a9",
+        "\u0623": "\u0627",
+        "\u0625": "\u0627",
+        "\u0622": "\u0627",
+        "\u0629": "\u0647",
+        "\u200c": "",
+        "\u200f": "",
+        "\u200e": "",
+    }
+
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+
+    text = re.sub(r"[\s\-_().,'\"/]+", "", text)
+    return text
+
+
+def provider_team_names(provider_match, side):
+    team = provider_match.get("host") if side == "home" else provider_match.get("guest")
+    names = []
+
+    if isinstance(team, dict):
+        names.extend(
+            [
+                team.get("name"),
+                team.get("title"),
+                team.get("enName"),
+                team.get("latinName"),
+                team.get("shortName"),
+            ]
+        )
+
+    names.extend(
+        [
+            provider_match.get("hostName") if side == "home" else provider_match.get("guestName"),
+            provider_match.get("homeName") if side == "home" else provider_match.get("awayName"),
+            provider_match.get("homeTeamName") if side == "home" else provider_match.get("awayTeamName"),
+        ]
+    )
+
+    return {normalize_match_name(name) for name in names if name}
+
+
+def local_team_names(match, side):
+    return {
+        normalize_match_name(value)
+        for value in (
+            match.get(f"{side}_fa"),
+            match.get(f"{side}_en"),
+            match.get(f"{side}_team_name_fa"),
+            match.get(f"{side}_team_name_en"),
+            match.get(f"{side}_team_label"),
+            match.get(f"{side}_team"),
+        )
+        if value
+    }
+
+
+def names_match(local_names, provider_names):
+    if not local_names or not provider_names:
+        return False
+
+    if local_names.intersection(provider_names):
+        return True
+
+    for local_name in local_names:
+        for provider_name in provider_names:
+            if local_name and provider_name and (local_name in provider_name or provider_name in local_name):
+                return True
+
+    return False
+
+
+def parse_provider_kickoff(provider_match):
+    candidates = (
+        provider_match.get("startOnUtc"),
+        provider_match.get("startDateUtc"),
+        provider_match.get("startTimeUtc"),
+        provider_match.get("startOn"),
+        provider_match.get("startDate"),
+        provider_match.get("dateTime"),
+    )
+
+    for value in candidates:
+        if not value:
+            continue
+
+        parsed = parse_iso_datetime(value)
+
+        if parsed:
+            return parsed
+
+    if provider_match.get("date") and provider_match.get("time"):
+        return parse_iso_datetime(f"{provider_match.get('date')}T{provider_match.get('time')}")
+
+    return None
+
+
+def provider_raw_status(provider_match):
+    return {
+        "status": provider_match.get("status"),
+        "statusTitle": provider_match.get("statusTitle"),
+        "liveTime": provider_match.get("liveTime"),
+        "isLive": bool(provider_match.get("isLive")),
+        "startOnUtc": provider_match.get("startOnUtc"),
+        "date": provider_match.get("date"),
+        "time": provider_match.get("time"),
+    }
+
+
+def fetch_varzesh3_provider_matches(force=False):
+    now = time.time()
+
+    if (
+        not force
+        and _provider_match_cache["matches"]
+        and now - _provider_match_cache["last_refresh"] < VARZESH3_PROVIDER_CACHE_TTL_SECONDS
+    ):
+        return _provider_match_cache["matches"]
+
+    matches_by_id = {}
+
+    urls = []
+
+    for path in ("/api/matches", "/matches"):
+        urls.append(f"{VARZESH3_API_BASE_URL}{path}")
+
+    for offset in VARZESH3_PROVIDER_OFFSETS:
+        urls.append(
+            f"{VARZESH3_LIVESCORE_BASE_URL}/today"
+            if offset == 0
+            else f"{VARZESH3_LIVESCORE_BASE_URL}/{offset}"
+        )
+
+    for url in urls:
+
+        try:
+            response = requests.get(
+                url,
+                timeout=get_timeout_seconds(),
+                headers={"User-Agent": "MatchPulse/1.0"},
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as error:
+            warn(f"[WORLDCUP_EVENT_ID_RESOLVE] provider_list_failed url={url} error={error}")
+            continue
+
+        provider_groups = payload if isinstance(payload, list) else payload_list(payload, ("matches", "data", "items", "results"))
+
+        for league in provider_groups if isinstance(provider_groups, list) else []:
+            league_matches = []
+
+            if isinstance(league, dict) and league.get("id") == VARZESH3_WORLD_CUP_LEAGUE_ID:
+                if isinstance(league.get("matches"), list):
+                    league_matches.extend(league.get("matches"))
+
+                for date_group in league.get("dates") or []:
+                    if isinstance(date_group, dict) and isinstance(date_group.get("matches"), list):
+                        league_matches.extend(date_group.get("matches"))
+            elif isinstance(league, dict):
+                league_id = league.get("leagueId") or league.get("league_id") or league.get("competitionId")
+                if league_id not in {VARZESH3_WORLD_CUP_LEAGUE_ID, str(VARZESH3_WORLD_CUP_LEAGUE_ID)}:
+                    continue
+                league_matches.append(league)
+
+            for provider_match in league_matches:
+                provider_id = str(provider_match.get("id") or "")
+
+                if provider_id:
+                    matches_by_id[provider_id] = provider_match
+
+    provider_matches = list(matches_by_id.values())
+    _provider_match_cache["matches"] = provider_matches
+    _provider_match_cache["last_refresh"] = now
+    warn(f"[WORLDCUP_EVENT_ID_RESOLVE] provider_list_count={len(provider_matches)}")
+
+    return provider_matches
+
+
+def resolve_provider_match_for_local_match(match, provider_matches=None):
+    existing = match.get("external_match_id") or match.get("raw_provider_match_id")
+    match_id = match.get("id") or match.get("internal_match_id")
+    teams = f"{match.get('home_en') or match.get('home_team_name_en')} vs {match.get('away_en') or match.get('away_team_name_en')}"
+
+    if existing:
+        warn(
+            "[WORLDCUP_EVENT_ID_RESOLVE] "
+            f"internal={match_id} teams={teams} date={match.get('kickoff_iso') or match.get('local_date') or ''} "
+            f"resolved_external={existing} method=existing"
+        )
+        warn(
+            "[EVENT_RESOLVE_AUDIT] "
+            f"id={match_id} teams={teams} external={existing} method=existing event_count=unknown"
+        )
+        persist_external_match_id(match_id, existing)
+        return str(existing), "existing", None
+
+    persistent_external = load_persistent_match_map().get(str(match_id))
+
+    if persistent_external:
+        warn(
+            "[EVENT_RESOLVE_AUDIT] "
+            f"id={match_id} teams={teams} external={persistent_external} method=persistent_map event_count=unknown"
+        )
+        return persistent_external, "persistent_map", None
+
+    provider_matches = provider_matches if provider_matches is not None else fetch_varzesh3_provider_matches()
+    local_home_names = local_team_names(match, "home")
+    local_away_names = local_team_names(match, "away")
+    kickoff = parse_match_datetime(match)
+    candidates = []
+
+    for provider_match in provider_matches:
+        if not names_match(local_home_names, provider_team_names(provider_match, "home")):
+            continue
+
+        if not names_match(local_away_names, provider_team_names(provider_match, "away")):
+            continue
+
+        provider_kickoff = parse_provider_kickoff(provider_match)
+        distance = (
+            abs((provider_kickoff - kickoff).total_seconds())
+            if provider_kickoff and kickoff
+            else 0
+        )
+
+        if provider_kickoff and kickoff and distance > PROVIDER_MATCH_TOLERANCE_SECONDS:
+            continue
+
+        candidates.append((distance, provider_match))
+
+    if candidates:
+        candidates.sort(key=lambda item: item[0])
+        provider_match = candidates[0][1]
+        resolved = str(provider_match.get("id") or "")
+        warn(
+            "[WORLDCUP_EVENT_ID_RESOLVE] "
+            f"internal={match_id} teams={teams} date={match.get('kickoff_iso') or match.get('local_date') or ''} "
+            f"resolved_external={resolved} method=team_date_match"
+        )
+        warn(
+            "[EVENT_RESOLVE_AUDIT] "
+            f"id={match_id} teams={teams} external={resolved} method=team_date_match event_count=unknown"
+        )
+        persist_external_match_id(match_id, resolved)
+        return resolved, "team_date_match", provider_match
+
+    warn(
+        "[WORLDCUP_EVENT_ID_RESOLVE] "
+        f"internal={match_id} teams={teams} date={match.get('kickoff_iso') or match.get('local_date') or ''} "
+        "resolved_external= method=failed"
+    )
+    warn(
+        "[EVENT_RESOLVE_AUDIT] "
+        f"id={match_id} teams={teams} external= method=failed event_count=0"
+    )
+    return None, "failed", None
+
+
+def enrich_match_provider_identity(match, provider_matches=None):
+    item = dict(match)
+    resolved, method, provider_match = resolve_provider_match_for_local_match(item, provider_matches)
+
+    if not resolved:
+        return item
+
+    item["external_match_id"] = resolved
+    item["raw_provider_match_id"] = resolved
+    item["provider"] = "varzesh3"
+    item["event_id_resolution_method"] = method
+
+    if provider_match:
+        item["raw_provider_status"] = provider_raw_status(provider_match)
+
+    return item
+
+
 def format_tehran_time(kickoff_utc):
     if kickoff_utc is None:
         return ""
@@ -477,10 +855,15 @@ def normalize_status(status):
     if normalized in {"live", "in_progress", "ongoing", "1h", "2h", "ht", "et"}:
         return "live"
 
-    if normalized in {"finished", "finish", "ft", "ended", "complete", "completed"}:
+    if normalized in {"finished", "finish", "ft", "ended", "end", "complete", "completed", "full_time", "fulltime", "final"}:
         return "finished"
 
     return "upcoming"
+
+
+def normalize_status_text(value):
+    text = str(value or "").strip().lower()
+    return re.sub(r"[\s\-_]+", "_", text)
 
 
 def is_true_like(value):
@@ -488,6 +871,111 @@ def is_true_like(value):
         return True
 
     return str(value or "").strip().lower() in {"true", "1", "yes", "y"}
+
+
+def has_match_score(match):
+    score = match.get("score") if isinstance(match.get("score"), dict) else {}
+    home_score = first_value(match, ("home_score", "homeScore", "home_goals", "homeGoals"))
+    away_score = first_value(match, ("away_score", "awayScore", "away_goals", "awayGoals"))
+
+    if home_score is None:
+        home_score = score.get("home")
+
+    if away_score is None:
+        away_score = score.get("away")
+
+    return home_score is not None and away_score is not None
+
+
+def score_values(match):
+    score = match.get("score") if isinstance(match.get("score"), dict) else {}
+    home_score = first_value(match, ("home_score", "homeScore", "home_goals", "homeGoals"))
+    away_score = first_value(match, ("away_score", "awayScore", "away_goals", "awayGoals"))
+
+    if home_score is None:
+        home_score = score.get("home")
+
+    if away_score is None:
+        away_score = score.get("away")
+
+    return coerce_int(home_score), coerce_int(away_score)
+
+
+def raw_score_is_placeholder(match):
+    home_score, away_score = score_values(match)
+    return home_score == 0 and away_score == 0
+
+
+def kickoff_is_safely_past(match, hours_after_kickoff=3):
+    kickoff_utc = parse_match_datetime(match)
+
+    if kickoff_utc is None:
+        return False
+
+    return kickoff_utc + timedelta(hours=hours_after_kickoff) < datetime.now(UTC_TZ)
+
+
+def kickoff_is_past(match):
+    kickoff_utc = parse_match_datetime(match)
+
+    if kickoff_utc is None:
+        return False
+
+    return kickoff_utc < datetime.now(UTC_TZ)
+
+
+def has_trusted_result_signal(match):
+    score_source = match.get("score_source") or match.get("_score_source")
+    if score_source in {"raw_final", "raw_score", "events", "scorers", "score_override", "worldcup_wrapper"}:
+        return True
+
+    if match.get("needs_score_sync") is True:
+        return True
+
+    if match.get("result"):
+        return True
+
+    return has_match_score(match)
+
+
+def can_show_in_results(match):
+    status = normalize_status_text(match.get("status"))
+
+    if match.get("is_finished") is True or status == "finished":
+        return True
+
+    return status == "pending_result" and kickoff_is_past(match) and has_trusted_result_signal(match)
+
+
+def event_button_visibility(match):
+    if not match.get("id"):
+        return False, "missing_internal_id"
+
+    status = normalize_status_text(match.get("status"))
+
+    if match.get("is_live") is True or status == "live":
+        return True, "live"
+
+    if match.get("is_finished") is True or status == "finished":
+        return True, "finished"
+
+    if status == "pending_result" and kickoff_is_past(match):
+        return True, "pending_past_match"
+
+    return False, "upcoming"
+
+
+def can_show_event_button(match):
+    return event_button_visibility(match)[0]
+
+
+def attach_visibility_flags(match):
+    item = dict(match)
+    event_button, event_button_reason = event_button_visibility(item)
+    item["can_show_in_results"] = can_show_in_results(item)
+    item["can_show_event_button"] = event_button
+    item["event_button_reason"] = event_button_reason
+    return item
 
 
 def normalize_match_status(match):
@@ -505,20 +993,70 @@ def normalize_match_status(match):
         match.get("status"),
         match.get("status_title"),
         match.get("time_elapsed"),
+        match.get("match_status"),
+        match.get("statusTitle"),
+        match.get("raw_status"),
         match.get("live_badge"),
         raw_status_title,
     ]
     normalized_candidates = {
-        str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+        normalize_status_text(value)
         for value in status_candidates
         if value is not None and value != ""
     }
+    finished_statuses = {
+        "finished",
+        "finish",
+        "ft",
+        "full_time",
+        "fulltime",
+        "ended",
+        "end",
+        "complete",
+        "completed",
+        "final",
+        "final_score",
+        "match_finished",
+        "result",
+    }
+    live_statuses = {"live", "in_progress", "ongoing", "1h", "2h", "ht", "et", "first_half", "second_half"}
+    cancelled_statuses = {
+        "cancelled",
+        "canceled",
+        "postponed",
+        "suspended",
+        "abandoned",
+        "delayed",
+    }
+    raw_status_text = " ".join(str(value or "") for value in status_candidates)
+    is_cancelled_or_postponed = bool(normalized_candidates.intersection(cancelled_statuses))
+    is_safely_past = kickoff_is_safely_past(match)
+    score_source = match.get("_score_source")
+    home_score, away_score = score_values(match)
+    has_reliable_time_fallback_score = (
+        score_source in {"events", "scorers"}
+        or (
+            has_match_score(match)
+            and home_score is not None
+            and away_score is not None
+            and (home_score != 0 or away_score != 0)
+        )
+    )
 
     if (
         is_true_like(match.get("finished"))
-        or normalized_candidates.intersection({"finished", "ft", "complete", "completed", "full_time"})
-        or str(raw_status_value) == "7"
+        or match.get("is_finished") is True
+        or normalized_candidates.intersection(finished_statuses)
+        or str(raw_status_value) in {"3", "7", "90", "100", "finished"}
         or "\u0646\u062a\u06cc\u062c\u0647 \u0646\u0647\u0627\u06cc\u06cc" in raw_status_title
+        or "\u067e\u0627\u06cc\u0627\u0646" in raw_status_text
+        or (
+            is_safely_past
+            and has_reliable_time_fallback_score
+            and not is_cancelled_or_postponed
+            and not raw_is_live
+            and match.get("is_live") is not True
+        )
     ):
         return {
             "status": "finished",
@@ -529,12 +1067,26 @@ def normalize_match_status(match):
 
     if (
         raw_is_live
-        or normalized_candidates.intersection({"live", "in_progress", "ongoing", "1h", "2h", "ht", "et"})
+        or match.get("is_live") is True
+        or normalized_candidates.intersection(live_statuses)
     ):
         return {
             "status": "live",
             "is_finished": False,
             "is_live": True,
+            "is_upcoming": False,
+        }
+
+    if (
+        is_safely_past
+        and raw_score_is_placeholder(match)
+        and match.get("_score_source") == "unresolved"
+        and not is_cancelled_or_postponed
+    ):
+        return {
+            "status": "pending_result",
+            "is_finished": False,
+            "is_live": False,
             "is_upcoming": False,
         }
 
@@ -567,6 +1119,62 @@ def flag_emoji(flag_url):
 
 
 def normalize_event_type(event):
+    def event_layers():
+        current = event
+        seen = set()
+
+        for _ in range(4):
+            if not isinstance(current, dict):
+                break
+
+            marker = id(current)
+            if marker in seen:
+                break
+
+            seen.add(marker)
+            yield current
+            current = current.get("raw_event")
+
+    def first_layer_value(keys):
+        for layer in event_layers():
+            value = first_value(layer, keys)
+
+            if value is not None and value != "":
+                return value
+
+        return None
+
+    def all_event_text():
+        values = []
+
+        for layer in event_layers():
+            for key in ("description", "title", "label", "eventTitle", "typeTitle", "decisionTitle", "name"):
+                value = layer.get(key)
+
+                if value is not None and value != "":
+                    values.append(str(repair_text(value) or value))
+
+        return " ".join(values).strip().lower()
+
+    text = all_event_text()
+    raw_event_type = coerce_int(first_layer_value(("eventType",)))
+    card_type = coerce_int(first_layer_value(("cardType", "card_type")))
+
+    if (
+        raw_event_type == 5
+        or "گل رد شده" in text
+        or ("گل" in text and "مردود" in text)
+        or ("گل" in text and "کمک داور ویدیویی" in text)
+        or ("goal" in text and ("disallowed" in text or "disallow" in text))
+    ):
+        return "var_disallowed_goal"
+
+    if card_type == 3 or "کارت قرمز" in text or "red card" in text:
+        return "red_card"
+
+    if card_type == 1 or "کارت زرد" in text or "yellow card" in text:
+        return "yellow_card"
+
     normalized = str(
         first_value(event, ("normalized_type", "type", "event_type", "eventType")) or ""
     ).strip().lower().replace("-", "_").replace(" ", "_")
@@ -578,6 +1186,11 @@ def normalize_event_type(event):
         "red": "red_card",
         "redcard": "red_card",
         "card_red": "red_card",
+        "penalty": "penalty_goal",
+        "missed_penalty": "penalty_missed",
+        "var_disallowed": "var_disallowed_goal",
+        "disallowed_var_goal": "var_disallowed_goal",
+        "disallowed_goal": "var_disallowed_goal",
         "sub": "substitution",
         "subst": "substitution",
         "substitute": "substitution",
@@ -591,10 +1204,11 @@ def normalize_event_type(event):
         "red_card",
         "substitution",
         "var",
-        "penalty",
+        "penalty_goal",
         "own_goal",
-        "second_yellow_card",
-        "missed_penalty",
+        "var_disallowed_goal",
+        "disallowed_goal",
+        "penalty_missed",
         "injury",
         "half_time",
         "full_time",
@@ -738,14 +1352,279 @@ def normalize_events(events):
     return normalized_events
 
 
+def normalize_provider_event(event, index):
+    side_value = event.get("side")
+    side = "home" if side_value == 0 else "away" if side_value == 1 else ""
+    event_type_value = event.get("eventType", event.get("type"))
+    normalized_type = VARZESH_EVENT_TYPES.get(event_type_value) or VARZESH_EVENT_TYPES.get(coerce_int(event_type_value))
+    player_object = event.get("player") if isinstance(event.get("player"), dict) else {}
+    assist_object = event.get("assist") if isinstance(event.get("assist"), dict) else {}
+    player = (
+        event.get("playerName")
+        or event.get("strickerName")
+        or event.get("strikerName")
+        or event.get("kickerName")
+        or player_object.get("name")
+    )
+    assist = (
+        event.get("assistName")
+        or event.get("assistantName")
+        or event.get("assistPlayerName")
+        or assist_object.get("name")
+    )
+
+    return {
+        "id": event.get("id") or event.get("eventId") or index,
+        "minute": event.get("time") or event.get("minute") or event.get("eventTime"),
+        "raw_minute": event.get("time") or event.get("minute") or event.get("eventTime"),
+        "event_type": normalized_type or event_type_value,
+        "type": normalized_type or event_type_value,
+        "normalized_type": normalized_type,
+        "team_side": side,
+        "side": side,
+        "player": player,
+        "scorer": event.get("strickerName") or event.get("strikerName") or event.get("kickerName"),
+        "assist": assist,
+        "description": event.get("description") or event.get("title") or event.get("eventTitle") or event.get("typeTitle"),
+        "video_url": event.get("videoUrl") or event.get("video_url"),
+        "created_at": event.get("createdAt") or event.get("created_at"),
+        "raw_event": event,
+    }
+
+
+def fetch_events_from_varzesh3_provider(external_match_id):
+    if not external_match_id:
+        return []
+
+    url = f"{VARZESH3_LIVESCORE_BASE_URL}/football/matches/{external_match_id}/events"
+
+    try:
+        response = requests.get(
+            url,
+            timeout=get_timeout_seconds(),
+            headers={"User-Agent": "MatchPulse/1.0"},
+        )
+        response.raise_for_status()
+        raw_events = response.json()
+    except Exception as error:
+        warn(
+            "Direct provider events failed: "
+            f"external_match_id={external_match_id}, "
+            f"url={url}, "
+            f"error={error}"
+        )
+        return []
+
+    normalized_events = normalize_events(
+        [
+            normalize_provider_event(event, index)
+            for index, event in enumerate(raw_events if isinstance(raw_events, list) else [])
+        ]
+    )
+    warn(
+        "Direct provider events response: "
+        f"external_match_id={external_match_id}, "
+        f"raw_event_count={len(raw_events) if isinstance(raw_events, list) else 0}, "
+        f"normalized_event_count={len(normalized_events)}"
+    )
+    return normalized_events
+
+
+def count_goal_events_by_side(events):
+    score = {"home": 0, "away": 0}
+
+    for event in events:
+        event_type = event.get("normalized_type") or event.get("type")
+
+        if event_type not in {"goal", "penalty_goal"}:
+            continue
+
+        side = str(event.get("team_side") or event.get("team") or "").strip().lower()
+
+        if side in {"home", "away"}:
+            score[side] += 1
+
+    return score["home"], score["away"]
+
+
+def derive_score_from_provider_events(match, match_id):
+    candidate_ids = []
+
+    for candidate_id in (match_id, match.get("external_match_id"), match.get("raw_provider_match_id")):
+        if candidate_id is not None and candidate_id != "" and candidate_id not in candidate_ids:
+            candidate_ids.append(candidate_id)
+
+    for candidate_id in candidate_ids:
+        payload = fetch_json(f"/match/{candidate_id}/events")
+        events = normalize_events(raw_events_from_payload(payload))
+        home_score, away_score = count_goal_events_by_side(events)
+
+        if home_score or away_score:
+            return home_score, away_score
+
+    external_id = match.get("external_match_id") or match.get("raw_provider_match_id")
+
+    if external_id:
+        events = fetch_events_from_varzesh3_provider(external_id)
+        home_score, away_score = count_goal_events_by_side(events)
+
+        if home_score or away_score:
+            return home_score, away_score
+
+    return None, None
+
+
+def derive_score_from_scorers(match):
+    home_events = events_from_scorers({"id": match.get("id"), "home_scorers": match.get("home_scorers")})
+    away_events = events_from_scorers({"id": match.get("id"), "away_scorers": match.get("away_scorers")})
+    events = normalize_events(home_events + away_events)
+    home_score, away_score = count_goal_events_by_side(events)
+
+    if home_score or away_score:
+        return home_score, away_score
+
+    return None, None
+
+
+def explicit_final_status(match):
+    raw_provider_status = match.get("raw_provider_status") if isinstance(match.get("raw_provider_status"), dict) else {}
+    status_candidates = [
+        match.get("status"),
+        match.get("status_title"),
+        match.get("time_elapsed"),
+        match.get("match_status"),
+        match.get("statusTitle"),
+        match.get("raw_status"),
+        raw_provider_status.get("statusTitle"),
+    ]
+    normalized_candidates = {
+        normalize_status_text(value)
+        for value in status_candidates
+        if value is not None and value != ""
+    }
+    raw_status_title = str(raw_provider_status.get("statusTitle") or match.get("statusTitle") or "")
+    raw_status_text = " ".join(str(value or "") for value in status_candidates)
+
+    return (
+        is_true_like(match.get("finished"))
+        or match.get("is_finished") is True
+        or normalized_candidates.intersection({
+            "finished",
+            "finish",
+            "ft",
+            "full_time",
+            "fulltime",
+            "ended",
+            "end",
+            "complete",
+            "completed",
+            "final",
+            "final_score",
+            "match_finished",
+            "result",
+        })
+        or str(raw_provider_status.get("status") or match.get("statusCode") or match.get("state") or "") in {"3", "7", "90", "100", "finished"}
+        or "\u0646\u062a\u06cc\u062c\u0647 \u0646\u0647\u0627\u06cc\u06cc" in raw_status_title
+        or "\u067e\u0627\u06cc\u0627\u0646" in raw_status_text
+    )
+
+
+def resolve_match_score(match, match_id):
+    raw_home_score, raw_away_score = score_values(match)
+
+    if explicit_final_status(match) and raw_home_score is not None and raw_away_score is not None:
+        return raw_home_score, raw_away_score, "raw_final"
+
+    scorer_home_score, scorer_away_score = derive_score_from_scorers(match)
+
+    if scorer_home_score is not None and scorer_away_score is not None:
+        return scorer_home_score, scorer_away_score, "scorers"
+
+    if kickoff_is_safely_past(match) and raw_score_is_placeholder(match):
+        event_home_score, event_away_score = derive_score_from_provider_events(match, match_id)
+
+        if event_home_score is not None and event_away_score is not None:
+            return event_home_score, event_away_score, "events"
+
+    if raw_home_score is not None and raw_away_score is not None and (raw_home_score != 0 or raw_away_score != 0):
+        return raw_home_score, raw_away_score, "raw_score"
+
+    return raw_home_score, raw_away_score, "unresolved"
+
+
+def override_status_is_finished(override):
+    return normalize_status_text(override.get("status")) in {
+        "finished",
+        "finish",
+        "ft",
+        "full_time",
+        "fulltime",
+        "completed",
+        "complete",
+    }
+
+
+def apply_local_score_overrides(matches):
+    try:
+        from db_service import get_all_match_score_overrides_from_db
+    except Exception as exc:
+        warn(f"Local score overrides unavailable: {exc}")
+        return matches
+
+    try:
+        overrides = get_all_match_score_overrides_from_db()
+    except Exception as exc:
+        warn(f"Local score overrides failed: {exc}")
+        return matches
+
+    if not overrides:
+        return matches
+
+    adjusted_matches = []
+
+    for match in matches:
+        item = dict(match)
+        override = overrides.get(item.get("id"))
+
+        if not override:
+            adjusted_matches.append(attach_visibility_flags(item))
+            continue
+
+        home_score = override.get("home_score")
+        away_score = override.get("away_score")
+
+        if home_score is None or away_score is None:
+            adjusted_matches.append(attach_visibility_flags(item))
+            continue
+
+        item["home_score"] = home_score
+        item["away_score"] = away_score
+        item["score"] = {
+            "home": home_score,
+            "away": away_score,
+        }
+        item["result"] = override.get("result") or item.get("result")
+        item["score_source"] = override.get("source") or "score_override"
+        item["needs_score_sync"] = False
+
+        if override_status_is_finished(override) or kickoff_is_safely_past(item, hours_after_kickoff=0):
+            item["status"] = "finished"
+            item["is_finished"] = True
+            item["is_live"] = False
+            item["is_upcoming"] = False
+            item["live_badge"] = False
+
+        adjusted_matches.append(attach_visibility_flags(item))
+
+    return adjusted_matches
+
+
 def normalize_match(match):
     if not isinstance(match, dict):
         return None
 
     match_id = first_value(match, ("id", "internal_match_id", "match_id", "matchId"))
     normalized_match_id = coerce_int(match_id)
-    status_info = normalize_match_status(match)
-    status = status_info["status"]
     score = match.get("score") if isinstance(match.get("score"), dict) else {}
     home_score = first_value(match, ("home_score", "homeScore"))
     away_score = first_value(match, ("away_score", "awayScore"))
@@ -755,6 +1634,22 @@ def normalize_match(match):
 
     if away_score is None:
         away_score = score.get("away")
+
+    resolved_home_score, resolved_away_score, score_source = resolve_match_score(match, normalized_match_id if normalized_match_id is not None else match_id)
+    home_score = resolved_home_score
+    away_score = resolved_away_score
+    match_for_status = {
+        **match,
+        "home_score": home_score,
+        "away_score": away_score,
+        "score": {
+            "home": home_score,
+            "away": away_score,
+        },
+        "_score_source": score_source,
+    }
+    status_info = normalize_match_status(match_for_status)
+    status = status_info["status"]
 
     home_flag = match.get("home_flag") or match.get("home_team_flag") or ""
     away_flag = match.get("away_flag") or match.get("away_team_flag") or ""
@@ -768,8 +1663,39 @@ def normalize_match(match):
     )
     weekday_fa = match.get("weekday_fa") or format_weekday_fa(kickoff_utc)
     date_key = kickoff_date_key(kickoff_utc)
+    should_debug_status = normalized_match_id in range(45, 61)
 
-    return {
+    if should_debug_status:
+        raw_provider_status = match.get("raw_provider_status") if isinstance(match.get("raw_provider_status"), dict) else {}
+        warn(
+            "[WORLDCUP_DEBUG_STATUS] "
+            f"id={normalized_match_id if normalized_match_id is not None else match_id} "
+            f"external={match.get('external_match_id') or match.get('raw_provider_match_id') or ''} "
+            f"teams={match.get('home_team_name_en') or match.get('home_en') or match.get('home_team') or match.get('home_team_id')} vs "
+            f"{match.get('away_team_name_en') or match.get('away_en') or match.get('away_team') or match.get('away_team_id')} "
+            f"raw_status={match.get('status') or match.get('time_elapsed') or ''} "
+            f"raw_statusTitle={match.get('statusTitle') or match.get('status_title') or raw_provider_status.get('statusTitle') or ''} "
+            f"raw_state={match.get('state') or match.get('statusCode') or raw_provider_status.get('status') or ''} "
+            f"raw_date={match.get('local_date') or match.get('localDate') or match.get('persian_date') or ''} "
+            f"raw_score={first_value(match, ('home_score', 'homeScore'))}-{first_value(match, ('away_score', 'awayScore'))} "
+            f"normalized_status={status} "
+            f"is_finished={status_info['is_finished']} "
+            f"is_live={status_info['is_live']}"
+        )
+        warn(
+            "[WORLDCUP_SCORE_RESOLVE] "
+            f"id={normalized_match_id if normalized_match_id is not None else match_id} "
+            f"external={match.get('external_match_id') or match.get('raw_provider_match_id') or ''} "
+            f"teams={match.get('home_team_name_en') or match.get('home_en') or match.get('home_team') or match.get('home_team_id')} vs "
+            f"{match.get('away_team_name_en') or match.get('away_en') or match.get('away_team') or match.get('away_team_id')} "
+            f"raw_status={match.get('status') or match.get('time_elapsed') or ''} "
+            f"raw_score={first_value(match, ('home_score', 'homeScore'))}-{first_value(match, ('away_score', 'awayScore'))} "
+            f"score_source={score_source} "
+            f"derived_score={home_score}-{away_score} "
+            f"normalized_status={status}"
+        )
+
+    normalized_item = {
         **match,
         "id": normalized_match_id if normalized_match_id is not None else match_id,
         "internal_match_id": match.get("internal_match_id") or match_id,
@@ -798,7 +1724,8 @@ def normalize_match(match):
         "live_badge": status == "live",
         "raw_live_badge": match.get("live_badge"),
         "events": normalize_events(match.get("events") or []),
-        "score_source": "worldcup_wrapper",
+        "score_source": score_source if score_source != "unresolved" else "worldcup_wrapper",
+        "needs_score_sync": score_source == "unresolved" and kickoff_is_safely_past(match) and raw_score_is_placeholder(match),
         "kickoff": kickoff_iso or match.get("kickoff") or match.get("kickoff_utc") or "",
         "kickoff_utc": kickoff_utc_iso or match.get("kickoff_utc") or match.get("kickoff") or "",
         "kickoff_iso": kickoff_iso,
@@ -822,6 +1749,11 @@ def normalize_match(match):
         "result": match.get("result"),
         "last_updated": match.get("last_updated"),
     }
+    event_button, event_button_reason = event_button_visibility(normalized_item)
+    normalized_item["can_show_in_results"] = can_show_in_results(normalized_item)
+    normalized_item["can_show_event_button"] = event_button
+    normalized_item["event_button_reason"] = event_button_reason
+    return normalized_item
 
 
 def normalize_team(team):
@@ -897,9 +1829,12 @@ def fetch_matches_from_wrapper():
     stadiums_payload = fetch_json("/get/stadiums")
     team_lookup = build_lookup(payload_list(teams_payload, ("teams", "data", "results", "items")))
     stadium_lookup = build_lookup(payload_list(stadiums_payload, ("stadiums", "data", "results", "items")))
+    provider_matches = fetch_varzesh3_provider_matches()
 
     for match in games:
-        normalized_match = normalize_match(enrich_game(match, team_lookup, stadium_lookup))
+        enriched_match = enrich_game(match, team_lookup, stadium_lookup)
+        enriched_match = enrich_match_provider_identity(enriched_match, provider_matches)
+        normalized_match = normalize_match(enriched_match)
 
         if normalized_match is not None:
             matches.append(normalized_match)
@@ -1019,30 +1954,79 @@ def raw_events_from_payload(payload):
 
 
 def parse_scorer_list(value):
+    if isinstance(value, list):
+        return value
+
     normalized = str(value or "").strip()
 
     if not normalized or normalized.lower() == "null":
         return []
 
     normalized = normalized.strip("{}[]")
-    return [item.strip().strip('"').strip("'") for item in normalized.split(",") if item.strip()]
+    return [
+        item.strip().strip('"').strip("'")
+        for item in re.split(r"[,;،]", normalized)
+        if item.strip()
+    ]
+
+
+def parse_scorer_entry(entry):
+    if isinstance(entry, dict):
+        scorer = repair_text(first_value(entry, ("scorer", "player", "player_name", "playerName", "name")))
+        raw_minute = format_minute_token(first_value(entry, ("display_minute", "raw_minute", "minute", "time", "elapsed")))
+        minute = coerce_int(raw_minute.split("+", 1)[0]) if raw_minute else coerce_int(entry.get("minute"))
+
+        return {
+            "scorer": scorer or "",
+            "minute": minute,
+            "raw_minute": raw_minute,
+        }
+
+    text = repair_text(entry) or ""
+    normalized = normalize_digits(text)
+    minute_match = re.search(
+        r"(\d{1,3}(?:\s*\+\s*\d{1,2})?)\s*(?:['\u2019\u2032])?(?:\([^)]*\))?\s*$",
+        normalized,
+    )
+    raw_minute = re.sub(r"\s+", "", minute_match.group(1)) if minute_match else ""
+    scorer = normalized
+
+    if minute_match:
+        scorer = normalized[:minute_match.start()] + normalized[minute_match.end():]
+
+    scorer = re.sub(r"\([^)]*\)", "", scorer)
+    scorer = scorer.strip(" -:\u200c'")
+
+    return {
+        "scorer": scorer,
+        "minute": coerce_int(raw_minute.split("+", 1)[0]) if raw_minute else None,
+        "raw_minute": raw_minute,
+    }
 
 
 def events_from_scorers(game):
     events = []
 
     for side, key in (("home", "home_scorers"), ("away", "away_scorers")):
-        for index, scorer in enumerate(parse_scorer_list(game.get(key)), start=1):
+        for index, scorer_entry in enumerate(parse_scorer_list(game.get(key)), start=1):
+            parsed_scorer = parse_scorer_entry(scorer_entry)
+
+            if not parsed_scorer["scorer"]:
+                continue
+
             events.append(
                 {
                     "id": f"{game.get('id')}-{side}-goal-{index}",
-                    "minute": None,
+                    "minute": parsed_scorer["minute"],
+                    "raw_minute": parsed_scorer["raw_minute"],
+                    "display_minute": parsed_scorer["raw_minute"],
                     "type": "goal",
                     "normalized_type": "goal",
                     "team": side,
                     "team_side": side,
-                    "player": scorer,
-                    "scorer": scorer,
+                    "player": parsed_scorer["scorer"],
+                    "player_name": parsed_scorer["scorer"],
+                    "scorer": parsed_scorer["scorer"],
                     "description": "goal",
                 }
             )
@@ -1077,7 +2061,7 @@ def external_match_id_for(match_id):
     if match is None:
         return match_id, None
 
-    return match.get("external_match_id") or match.get("id") or match_id, match
+    return match.get("external_match_id") or match.get("raw_provider_match_id"), match
 
 
 def fetch_single_game(match_id):
@@ -1090,47 +2074,143 @@ def fetch_single_game(match_id):
 
 
 def fetch_events_from_wrapper(match_id, metadata_match=None):
-    local_match_id = metadata_match.get("id") if metadata_match else match_id
-    event_path = f"/match/{local_match_id}/events"
-    payload = fetch_json(event_path)
-    raw_events = raw_events_from_payload(payload)
-    events = normalize_events(raw_events)
+    resolved_metadata = enrich_match_provider_identity(metadata_match or {"id": match_id})
+    local_match_id = resolved_metadata.get("id") if resolved_metadata else match_id
+    external_match_id = resolved_metadata.get("external_match_id") if resolved_metadata else None
+    provider = resolved_metadata.get("provider") if resolved_metadata else None
+    resolve_method = resolved_metadata.get("event_id_resolution_method") if resolved_metadata else "failed"
+    teams = (
+        f"{resolved_metadata.get('home_en') or resolved_metadata.get('home_team_name_en') or ''} vs "
+        f"{resolved_metadata.get('away_en') or resolved_metadata.get('away_team_name_en') or ''}"
+        if resolved_metadata
+        else ""
+    )
+    candidate_ids = []
 
-    if events:
-        return events
+    for candidate_id in (external_match_id, local_match_id):
+        if candidate_id is not None and candidate_id != "" and candidate_id not in candidate_ids:
+            candidate_ids.append(candidate_id)
 
-    live_path = f"/match/{local_match_id}/live"
-    live_payload = fetch_json(live_path)
-    live_raw_events = raw_events_from_payload(live_payload)
-    live_events = normalize_events(live_raw_events)
+    warn(
+        "Events requested: "
+        f"internal_match_id={local_match_id}, "
+        f"external_match_id={external_match_id or ''}, "
+        f"provider={provider or ''}"
+    )
 
-    if live_events:
-        return live_events
+    if external_match_id:
+        direct_events = fetch_events_from_varzesh3_provider(external_match_id)
 
-    game, game_payload = fetch_single_game(local_match_id)
-    scorer_events = events_from_scorers(game or metadata_match or {})
+        if direct_events:
+            warn(
+                "Events resolved via direct provider: "
+                f"internal_match_id={local_match_id}, "
+                f"external_match_id={external_match_id}, "
+                f"normalized_event_count={len(direct_events)}"
+            )
+            warn(
+                "[EVENT_RESOLVE_AUDIT] "
+                f"id={local_match_id} teams={teams} external={external_match_id} "
+                f"method={resolve_method or 'existing'} event_count={len(direct_events)}"
+            )
+            return direct_events
 
-    if scorer_events:
-        return normalize_events(scorer_events)
+    for candidate_id in candidate_ids:
+        event_path = f"/match/{candidate_id}/events"
+        payload = fetch_json(event_path)
+        raw_events = raw_events_from_payload(payload)
+        events = normalize_events(raw_events)
+        warn(
+            "Events provider response: "
+            f"internal_match_id={local_match_id}, "
+            f"provider_match_id={candidate_id}, "
+            f"raw_event_count={len(raw_events)}, "
+            f"normalized_event_count={len(events)}"
+        )
+
+        if events:
+            warn(
+                "[EVENT_RESOLVE_AUDIT] "
+                f"id={local_match_id} teams={teams} external={external_match_id or ''} "
+                f"method={resolve_method or 'wrapper_events'} event_count={len(events)}"
+            )
+            return events
+
+        live_path = f"/match/{candidate_id}/live"
+        live_payload = fetch_json(live_path)
+        live_raw_events = raw_events_from_payload(live_payload)
+        live_events = normalize_events(live_raw_events)
+        warn(
+            "Live events provider response: "
+            f"internal_match_id={local_match_id}, "
+            f"provider_match_id={candidate_id}, "
+            f"raw_event_count={len(live_raw_events)}, "
+            f"normalized_event_count={len(live_events)}"
+        )
+
+        if live_events:
+            warn(
+                "[EVENT_RESOLVE_AUDIT] "
+                f"id={local_match_id} teams={teams} external={external_match_id or ''} "
+                f"method={resolve_method or 'wrapper_live'} event_count={len(live_events)}"
+            )
+            return live_events
+
+    game = None
+    game_payload = None
+
+    for candidate_id in candidate_ids:
+        game, game_payload = fetch_single_game(candidate_id)
+
+        if game:
+            break
+
+    scorer_events = events_from_scorers(game or resolved_metadata or metadata_match or {})
+    normalized_scorer_events = normalize_events(scorer_events)
+    warn(
+        "Fallback scorer events: "
+        f"internal_match_id={local_match_id}, "
+        f"external_match_id={external_match_id or ''}, "
+        f"raw_scorer_event_count={len(scorer_events)}, "
+        f"normalized_event_count={len(normalized_scorer_events)}"
+    )
+
+    if normalized_scorer_events:
+        warn(
+            "[EVENT_RESOLVE_AUDIT] "
+            f"id={local_match_id} teams={teams} external={external_match_id or ''} "
+            f"method=scorer_fallback event_count={len(normalized_scorer_events)}"
+        )
+        return normalized_scorer_events
 
     warn(
         "Events empty: "
         f"internal_match_id={local_match_id}, "
-        f"external_match_id={metadata_match.get('external_match_id') if metadata_match else ''}, "
-        f"provider={metadata_match.get('provider') if metadata_match else ''}, "
-        f"event_endpoint={build_url(event_path)}, "
-        f"event_response={payload_debug_summary(payload)}, "
-        f"live_endpoint={build_url(live_path)}, "
-        f"live_response={payload_debug_summary(live_payload)}, "
-        f"game_endpoint={build_url(f'/get/game/{local_match_id}')}, "
+        f"external_match_id={external_match_id or ''}, "
+        f"provider={provider or ''}, "
+        f"candidate_ids={candidate_ids}, "
         f"game_response={payload_debug_summary(game_payload)}"
+    )
+    warn(
+        "[EVENT_RESOLVE_AUDIT] "
+        f"id={local_match_id} teams={teams} external={external_match_id or ''} method=failed event_count=0"
     )
 
     return []
 
 
 def refresh_cache():
-    matches = fetch_matches_from_wrapper()
+    matches = apply_local_score_overrides(fetch_matches_from_wrapper())
+    finished_count = sum(1 for match in matches if match.get("is_finished") is True)
+    live_count = sum(1 for match in matches if match.get("is_live") is True)
+    upcoming_count = sum(1 for match in matches if match.get("is_upcoming") is True)
+    pending_count = sum(1 for match in matches if match.get("status") == "pending_result")
+    score_sources = {}
+
+    for match in matches:
+        source = match.get("score_source") or "unknown"
+        score_sources[source] = score_sources.get(source, 0) + 1
+
     events = {
         match["id"]: match.get("events") or []
         for match in matches
@@ -1141,6 +2221,16 @@ def refresh_cache():
         _cache["matches"] = matches
         _cache["events"] = events
         _cache["last_refresh"] = time.time()
+
+    warn(
+        "Matches normalized: "
+        f"total={len(matches)}, "
+        f"finished={finished_count}, "
+        f"live={live_count}, "
+        f"upcoming={upcoming_count}, "
+        f"pending={pending_count}, "
+        f"score_sources={score_sources}"
+    )
 
 
 def poll_worldcup_wrapper():
@@ -1221,7 +2311,15 @@ def get_match_events_from_worldcup_wrapper(match_id):
     except (TypeError, ValueError):
         normalized_match_id = match_id
 
-    external_match_id, metadata_match = external_match_id_for(normalized_match_id)
+    _external_match_id, metadata_match = external_match_id_for(normalized_match_id)
+
+    if metadata_match:
+        metadata_match = enrich_match_provider_identity(metadata_match)
+
+    external_match_id = None
+
+    if metadata_match:
+        external_match_id = metadata_match.get("external_match_id") or metadata_match.get("raw_provider_match_id") or None
     events = fetch_events_from_wrapper(normalized_match_id, metadata_match)
 
     with _cache_lock:

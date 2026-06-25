@@ -143,7 +143,36 @@ function normalizeMatchStatus(match) {
 
   if (match?.is_live || status === "live") return "live";
   if (match?.is_finished || status === "finished") return "finished";
+  if (status === "pending_result") return "pending_result";
   return "upcoming";
+}
+
+function isFinishedMatch(match) {
+  return normalizeMatchStatus(match) === "finished" || match?.is_finished === true;
+}
+
+function isPendingResultMatch(match) {
+  return normalizeMatchStatus(match) === "pending_result";
+}
+
+function isResultTabMatch(match) {
+  return isFinishedMatch(match) || isPendingResultMatch(match);
+}
+
+function isLiveMatch(match) {
+  return normalizeMatchStatus(match) === "live" || match?.is_live === true;
+}
+
+function isPastPendingResult(match) {
+  if (!isPendingResultMatch(match)) return false;
+  const kickoff = getKickoffTime(match);
+  return Number.isFinite(kickoff) && kickoff <= Date.now();
+}
+
+function canShowEvents(match) {
+  if (!match?.id) return false;
+  if (match.can_show_event_button === true) return true;
+  return isFinishedMatch(match) || isLiveMatch(match) || isPastPendingResult(match);
 }
 
 function isFutureMatchStatus(match) {
@@ -265,6 +294,10 @@ function getMatchStatus(match, t) {
     return { key: "finished", label: t.statusFinished };
   }
 
+  if (normalizedStatus === "pending_result") {
+    return { key: "pending_result", label: t.scorePending };
+  }
+
   if (normalizedStatus === "upcoming") {
     return { key: "upcoming", label: t.statusUpcoming };
   }
@@ -335,8 +368,8 @@ const translations = {
     scorePending: "نتیجه هنوز ثبت نشده",
     matchEvents: "رویدادها",
     loadingEvents: "در حال دریافت رویدادها...",
-    noEvents: "برای این بازی هنوز رویدادی ثبت نشده است",
-    eventSourceUnavailable: "جزئیات این بازی هنوز از منبع داده دریافت نشده است",
+    noEvents: "رویدادی برای این بازی ثبت نشده یا در منبع فعلی در دسترس نیست",
+    eventSourceUnavailable: "رویدادی برای این بازی ثبت نشده یا در منبع فعلی در دسترس نیست",
     viewEvents: "مشاهده رویدادها",
     assistLabel: "پاس گل",
     playerInLabel: "",
@@ -408,8 +441,8 @@ const translations = {
     scorePending: "Score not recorded yet",
     matchEvents: "Events",
     loadingEvents: "Loading timeline...",
-    noEvents: "No events have been recorded for this match yet.",
-    eventSourceUnavailable: "Match details have not been received from the data source yet.",
+    noEvents: "No event is recorded for this match or available from the current source.",
+    eventSourceUnavailable: "No event is recorded for this match or available from the current source.",
     viewEvents: "View events",
     assistLabel: "Assist",
     playerInLabel: "",
@@ -424,17 +457,31 @@ const translations = {
 const EVENT_LABELS = {
   fa: {
     goal: "\u06af\u0644",
+    penalty_goal: "\u06af\u0644 \u067e\u0646\u0627\u0644\u062a\u06cc",
+    own_goal: "\u06af\u0644 \u0628\u0647 \u062e\u0648\u062f\u06cc",
+    var_disallowed_goal: "\u06af\u0644 \u0645\u0631\u062f\u0648\u062f \u0628\u0627 VAR",
+    disallowed_goal: "\u06af\u0644 \u0645\u0631\u062f\u0648\u062f \u0628\u0627 VAR",
+    penalty_missed: "\u067e\u0646\u0627\u0644\u062a\u06cc \u0627\u0632 \u062f\u0633\u062a \u0631\u0641\u062a\u0647",
     assist: "\u067e\u0627\u0633 \u06af\u0644",
     yellow_card: "\u06a9\u0627\u0631\u062a \u0632\u0631\u062f",
     red_card: "\u06a9\u0627\u0631\u062a \u0642\u0631\u0645\u0632",
     substitution: "\u062a\u0639\u0648\u06cc\u0636",
+    var: "VAR",
+    unknown: "\u0631\u0648\u06cc\u062f\u0627\u062f",
   },
   en: {
     goal: "Goal",
+    penalty_goal: "Penalty goal",
+    own_goal: "Own goal",
+    var_disallowed_goal: "VAR-disallowed goal",
+    disallowed_goal: "VAR-disallowed goal",
+    penalty_missed: "Missed penalty",
     assist: "Assist",
     yellow_card: "Yellow card",
     red_card: "Red card",
     substitution: "Substitution",
+    var: "VAR",
+    unknown: "Event",
   },
 };
 
@@ -522,8 +569,27 @@ function getEventPlayer(event) {
   ]);
 }
 
+function getNormalizedEventType(event) {
+  return String(event?.normalized_type || event?.event_type || event?.type || "unknown").toLowerCase();
+}
+
+function getRenderedEventIcon(type) {
+  return {
+    goal: "\u26bd",
+    penalty_goal: "\u26bd",
+    own_goal: "\u26bd\u21a9\ufe0f",
+    var_disallowed_goal: "\u274c",
+    disallowed_goal: "\u274c",
+    penalty_missed: "\u274c",
+    yellow_card: "\ud83d\udfe8",
+    red_card: "\ud83d\udfe5",
+    substitution: "\ud83d\udd01",
+    var: "\ud83c\udfa5",
+  }[type] || "\u2022";
+}
+
 function EventRow({ event, match, lang, t, index }) {
-  const type = event.type || event.normalized_type || "unknown";
+  const type = getNormalizedEventType(event);
   const team = resolveEventTeam(event, match, lang);
   const player = getEventPlayer(event);
   const eventMinute = event.display_minute || event.raw_minute || event.minute || "";
@@ -531,12 +597,7 @@ function EventRow({ event, match, lang, t, index }) {
   const playerIn = getFirstEventValue(event, ["player_in", "playerIn", "in_player"]);
   const playerOut = getFirstEventValue(event, ["player_out", "playerOut", "out_player"]);
   const title = getEventTypeLabel(type, lang) || event.description || type;
-  const eventIcon = {
-    goal: "\u26bd",
-    yellow_card: "\ud83d\udfe8",
-    red_card: "\ud83d\udfe5",
-    substitution: "\ud83d\udd01",
-  }[type] || "\u2022";
+  const eventIcon = getRenderedEventIcon(type);
   const key = [eventMinute, type, player, playerIn, playerOut, index].join("-");
 
   return (
@@ -592,14 +653,14 @@ function MatchCard({
   const isLive = match.status === "live";
   const matchScoreValue = getMatchScore(match);
   const matchScore =
-    matchStatus.key === "upcoming"
+    matchStatus.key === "upcoming" || matchStatus.key === "pending_result"
       ? ""
       : matchScoreValue || (matchStatus.key === "live" ? "0 - 0" : "");
   const homeName = getLocalizedTeamName(match, "home", lang);
   const awayName = getLocalizedTeamName(match, "away", lang);
-  const shouldShowScoreFallback = !matchScore && matchStatus.key === "finished";
+  const shouldShowScoreFallback = !matchScore && ["finished", "pending_result"].includes(matchStatus.key);
   const matchDateTime = formatTehranMatchDateTime(match, lang);
-  const canViewEvents = matchStatus.key === "finished";
+  const canViewEvents = canShowEvents(match);
   const stopCardClick = (event) => event.stopPropagation();
   const renderTeamName = (name, flag, englishName, team) => {
     const isFavorite = team
@@ -703,7 +764,7 @@ function MatchCard({
                 <EventRow
                   event={event}
                   index={index}
-                  key={`${event.minute}-${event.type}-${event.player}-${event.team}-${index}`}
+                  key={`${event.display_minute || event.raw_minute || event.minute}-${event.type}-${event.player}-${event.team}-${index}`}
                   lang={lang}
                   match={match}
                   t={t}
@@ -833,7 +894,7 @@ function App() {
   });
 
   const liveMatches = useMemo(
-    () => matches.filter((match) => match.is_live === true || match.status === "live"),
+    () => matches.filter((match) => isLiveMatch(match)),
     [matches],
   );
 
@@ -843,7 +904,8 @@ function App() {
         (match) =>
           match.is_finished !== true &&
           match.is_live !== true &&
-          normalizeMatchStatus(match) !== "finished" &&
+          !isFinishedMatch(match) &&
+          !isLiveMatch(match) &&
           isFutureMatchStatus(match),
       )
       .map((match) => ({ match, kickoffTime: getKickoffTime(match) }))
@@ -857,7 +919,7 @@ function App() {
 
   const pastOnlyMatches = useMemo(
     () => matches
-      .filter((match) => match.is_finished === true)
+      .filter((match) => isResultTabMatch(match))
       .map((match) => ({ match, kickoffTime: getKickoffTime(match) }))
       .sort((first, second) => second.kickoffTime - first.kickoffTime)
       .map(({ match }) => match),
@@ -873,6 +935,19 @@ function App() {
     () => groupMatchesByDate(pastOnlyMatches, lang),
     [lang, pastOnlyMatches],
   );
+
+  useEffect(() => {
+    if (!pastOnlyMatches.length) return;
+
+    const firstResult = pastOnlyMatches[0];
+    const lastResult = pastOnlyMatches[pastOnlyMatches.length - 1];
+    console.debug(
+      "[RESULTS_DEBUG]",
+      `first_result=${firstResult?.home_en || ""} vs ${firstResult?.away_en || ""}`,
+      `last_result=${lastResult?.home_en || ""} vs ${lastResult?.away_en || ""}`,
+      `count=${pastOnlyMatches.length}`,
+    );
+  }, [pastOnlyMatches]);
 
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
@@ -1300,6 +1375,7 @@ function App() {
                 const { homeTeam, awayTeam } = getMatchTeams(match);
                 const isHomeFavorite = isTeamFavorite(homeTeam);
                 const isAwayFavorite = isTeamFavorite(awayTeam);
+                const showHeroEvents = canShowEvents(match);
 
                 return (
                   <div className="hero-next-item" key={match.id}>
@@ -1331,6 +1407,39 @@ function App() {
                       </strong>
                     </div>
                     <small>{matchDateTime.compact}</small>
+                    {showHeroEvents && (
+                      <button
+                        className="details-btn hero-details-btn"
+                        onClick={() => handleMatchDetailsClick(match)}
+                      >
+                        {t.viewEvents}
+                      </button>
+                    )}
+                    {showHeroEvents && selectedMatchId === match.id && (
+                      <div className="match-events">
+                        <h3>{t.matchEvents}</h3>
+                        {loadingEventsId === match.id ? (
+                          <p>{t.loadingEvents}</p>
+                        ) : eventUnavailableMatchIds.has(match.id) ? (
+                          <p>{t.eventSourceUnavailable}</p>
+                        ) : (matchEventsById[match.id] || []).length > 0 ? (
+                          <ol className="event-timeline">
+                            {(matchEventsById[match.id] || []).map((event, index) => (
+                              <EventRow
+                                event={event}
+                                index={index}
+                                key={`${event.display_minute || event.raw_minute || event.minute}-${event.type}-${event.player}-${event.team}-${index}`}
+                                lang={lang}
+                                match={match}
+                                t={t}
+                              />
+                            ))}
+                          </ol>
+                        ) : (
+                          <p>{t.noEvents}</p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
