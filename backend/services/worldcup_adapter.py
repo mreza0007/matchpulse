@@ -238,6 +238,119 @@ def first_value(data, keys):
     return None
 
 
+def text_value(value, language="en"):
+    if isinstance(value, dict):
+        if language == "fa":
+            value = first_value(
+                value,
+                ("name_fa", "fa_name", "persian_name", "title_fa", "name", "title"),
+            )
+        else:
+            value = first_value(
+                value,
+                ("name_en", "en_name", "english_name", "title_en", "name", "title", "shortName"),
+            )
+
+    return repair_text(value) or ""
+
+
+def first_team_text(match, side, language="en"):
+    if language == "fa":
+        keys = (
+            f"{side}_fa",
+            f"{side}_team_name_fa",
+            f"{side}_team_label_fa",
+            f"{side}TeamFa",
+        )
+    else:
+        keys = (
+            f"{side}_en",
+            f"{side}_team_label",
+            f"{side}_team",
+            f"{side}_team_name_en",
+            f"{side}Team",
+            "host" if side == "home" else "visitingTeam",
+        )
+
+    for key in keys:
+        value = text_value(match.get(key), language=language)
+
+        if value:
+            return value
+
+    return ""
+
+
+def persian_digits(value):
+    return str(value).translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹"))
+
+
+def placeholder_fa(value):
+    text = text_value(value)
+
+    if not text:
+        return ""
+
+    match = re.fullmatch(r"Winner\s+Match\s+(\d+)", text, flags=re.IGNORECASE)
+    if match:
+        return f"برنده بازی {persian_digits(match.group(1))}"
+
+    match = re.fullmatch(r"Loser\s+Match\s+(\d+)", text, flags=re.IGNORECASE)
+    if match:
+        return f"بازنده بازی {persian_digits(match.group(1))}"
+
+    match = re.fullmatch(r"Winner\s+Group\s+(.+)", text, flags=re.IGNORECASE)
+    if match:
+        return f"صدرنشین گروه {match.group(1).upper()}"
+
+    match = re.fullmatch(r"Runner[-\s]?up\s+Group\s+(.+)", text, flags=re.IGNORECASE)
+    if match:
+        return f"تیم دوم گروه {match.group(1).upper()}"
+
+    match = re.fullmatch(r"3rd\s+Group\s+(.+)", text, flags=re.IGNORECASE)
+    if match:
+        return f"تیم سوم یکی از گروه‌های {match.group(1).upper()}"
+
+    return ""
+
+
+STAGE_LABELS = {
+    "r16": "R16",
+    "r32": "R32",
+    "qf": "QF",
+    "sf": "SF",
+    "third": "Third",
+    "3rd": "Third",
+    "final": "Final",
+}
+
+
+def resolve_stage(match):
+    raw_stage = first_value(match, ("stage", "type"))
+    normalized_stage = str(raw_stage or "").strip().lower()
+
+    if normalized_stage not in STAGE_LABELS:
+        normalized_group = str(match.get("group") or "").strip().lower()
+        if normalized_group in STAGE_LABELS:
+            normalized_stage = normalized_group
+
+    if normalized_stage == "3rd":
+        normalized_stage = "third"
+
+    stage = normalized_stage or str(raw_stage or "").strip()
+    stage_label = STAGE_LABELS.get(normalized_stage) or match.get("stage_label") or stage
+    return stage, stage_label
+
+
+def display_flag(value):
+    text = str(value or "").strip()
+
+    if text and any(127462 <= ord(char) <= 127487 for char in text):
+        return text
+
+    return flag_emoji(text)
+
+
 def count_persian_chars(value):
     return len(re.findall(r"[\u0600-\u06ff]", str(value or "")))
 
@@ -1525,8 +1638,13 @@ def normalize_match(match):
     status_info = normalize_match_status(match_for_status)
     status = status_info["status"]
 
+    home_name_en = first_team_text(match, "home", language="en")
+    away_name_en = first_team_text(match, "away", language="en")
+    home_name_fa = first_team_text(match, "home", language="fa") or placeholder_fa(home_name_en)
+    away_name_fa = first_team_text(match, "away", language="fa") or placeholder_fa(away_name_en)
     home_flag = match.get("home_flag") or match.get("home_team_flag") or ""
     away_flag = match.get("away_flag") or match.get("away_team_flag") or ""
+    stage, stage_label = resolve_stage(match)
     kickoff_utc = parse_match_datetime(match)
     kickoff_tehran = kickoff_utc.astimezone(TEHRAN_TZ) if kickoff_utc else None
     kickoff_iso = kickoff_tehran.isoformat() if kickoff_tehran else ""
@@ -1575,16 +1693,16 @@ def normalize_match(match):
         "internal_match_id": match.get("internal_match_id") or match_id,
         "external_match_id": match.get("external_match_id") or match.get("raw_provider_match_id"),
         "provider": match.get("provider") or "worldcup2026",
-        "home_en": match.get("home_en") or match.get("home_team_name_en") or match.get("home_team") or "",
-        "away_en": match.get("away_en") or match.get("away_team_name_en") or match.get("away_team") or "",
-        "home_fa": match.get("home_fa") or match.get("home_team_name_fa") or "",
-        "away_fa": match.get("away_fa") or match.get("away_team_name_fa") or "",
+        "home_en": home_name_en,
+        "away_en": away_name_en,
+        "home_fa": home_name_fa,
+        "away_fa": away_name_fa,
         "home_flag_url": home_flag,
         "away_flag_url": away_flag,
-        "home_flag": flag_emoji(home_flag),
-        "away_flag": flag_emoji(away_flag),
-        "home_team": match.get("home_en") or match.get("home_team_name_en") or match.get("home_team") or "",
-        "away_team": match.get("away_en") or match.get("away_team_name_en") or match.get("away_team") or "",
+        "home_flag": display_flag(home_flag),
+        "away_flag": display_flag(away_flag),
+        "home_team": home_name_en,
+        "away_team": away_name_en,
         "home_score": coerce_int(home_score),
         "away_score": coerce_int(away_score),
         "score": {
@@ -1616,8 +1734,8 @@ def normalize_match(match):
         "time_iran": format_tehran_time(kickoff_utc) or match.get("time_iran") or "",
         "datetime_iran": match.get("datetime_iran") or "",
         "group": match.get("group") or "",
-        "stage": match.get("stage") or "",
-        "stage_label": match.get("stage_label") or match.get("stage") or "",
+        "stage": stage,
+        "stage_label": stage_label,
         "stadium": match.get("stadium") or match.get("stadium_name_en") or "",
         "city": match.get("city") or match.get("stadium_city_en") or "",
         "result": match.get("result"),
@@ -1691,12 +1809,12 @@ def enrich_game(game, team_lookup, stadium_lookup):
 
 
 def fetch_matches_from_wrapper():
-    payload = fetch_json("/get/games")
+    payload = fetch_json("/matches")
     matches = []
     games = payload_list(payload, ("games", "matches", "data", "results", "items"))
 
     if not games:
-        payload = fetch_json("/matches")
+        payload = fetch_json("/get/games")
         games = payload_list(payload, ("matches", "games", "data", "results", "items"))
 
     teams_payload = fetch_json("/get/teams")
