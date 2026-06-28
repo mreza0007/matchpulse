@@ -355,6 +355,15 @@ const translations = {
     live: "زنده",
     upcoming: "بازی‌های پیش‌رو",
     past: "نتایج",
+    bracket: "نمودار بازی‌ها",
+    bracketTitle: "مسیر قهرمانی",
+    bracketSubtitle: "مسیر مرحله حذفی جام جهانی؛ از یک‌شانزدهم نهایی تا فینال",
+    roundOf32: "یک‌شانزدهم نهایی",
+    roundOf16: "یک‌هشتم نهایی",
+    quarterfinals: "یک‌چهارم نهایی",
+    semifinals: "نیمه‌نهایی",
+    final: "فینال",
+    thirdPlace: "رده‌بندی",
     news: "اخبار",
     profile: "پروفایل",
     vs: "مقابل",
@@ -428,6 +437,15 @@ const translations = {
     live: "Live",
     upcoming: "Upcoming",
     past: "Results",
+    bracket: "Bracket",
+    bracketTitle: "Road to the Trophy",
+    bracketSubtitle: "The World Cup knockout path, from the round of 32 to the final.",
+    roundOf32: "Round of 32",
+    roundOf16: "Round of 16",
+    quarterfinals: "Quarterfinals",
+    semifinals: "Semifinals",
+    final: "Final",
+    thirdPlace: "Third place",
     news: "News",
     profile: "Profile",
     vs: "vs",
@@ -777,6 +795,97 @@ function MatchCard({
         </div>
       )}
     </article>
+  );
+}
+
+function BracketMatchCard({ match, lang, t }) {
+  if (!match) return <div className="bracket-match bracket-match-empty" aria-hidden="true" />;
+
+  const status = getMatchStatus(match, t);
+  const score = getMatchScore(match);
+  const showScore = ["live", "finished"].includes(status.key);
+  const homeName = getLocalizedTeamName(match, "home", lang) || match.home_team_label || t.unavailable;
+  const awayName = getLocalizedTeamName(match, "away", lang) || match.away_team_label || t.unavailable;
+
+  return (
+    <article
+      className={`bracket-match ${status.key === "live" ? "is-live" : ""} ${status.key === "finished" ? "is-finished" : ""}`}
+      dir={t.dir}
+    >
+      <header className="bracket-match-meta">
+        <span>{match.date_iran || "—"}</span>
+        <span>{match.time_iran || "—"}</span>
+        <span className={`bracket-status ${status.key}`}>{status.label}</span>
+      </header>
+
+      <div className="bracket-team-row">
+        <TeamFlag flagEmoji={match.home_flag} teamName={match.home_en} />
+        <strong title={homeName}>{homeName}</strong>
+        <b>{showScore ? getScoreValue(match, ["home_score", "homeScore"]) ?? "—" : ""}</b>
+      </div>
+      <div className="bracket-team-row">
+        <TeamFlag flagEmoji={match.away_flag} teamName={match.away_en} />
+        <strong title={awayName}>{awayName}</strong>
+        <b>{showScore ? getScoreValue(match, ["away_score", "awayScore"]) ?? "—" : ""}</b>
+      </div>
+
+      {showScore && score && <span className="bracket-score-summary">{score}</span>}
+      <span className="bracket-match-number">#{match.id}</span>
+    </article>
+  );
+}
+
+function BracketColumn({ ids, matchesById, round, title, side, lang, t }) {
+  return (
+    <section className={`bracket-column round-${round} side-${side}`}>
+      <h3>{title}</h3>
+      <div className="bracket-slots">
+        {ids.map((id) => (
+          <div className="bracket-slot" key={id}>
+            <BracketMatchCard match={matchesById.get(id)} lang={lang} t={t} />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function KnockoutBracket({ matches, lang, t }) {
+  const matchesById = useMemo(
+    () => new Map(
+      matches
+        .filter((match) => Number(match.id) >= 73 && Number(match.id) <= 104)
+        .map((match) => [Number(match.id), match]),
+    ),
+    [matches],
+  );
+
+  return (
+    <div className="bracket-scroll" dir="ltr">
+      <div className="bracket-board">
+        <BracketColumn ids={[73, 75, 74, 77, 76, 78, 79, 80]} matchesById={matchesById} round="r32" title={t.roundOf32} side="left" lang={lang} t={t} />
+        <BracketColumn ids={[90, 89, 91, 92]} matchesById={matchesById} round="r16" title={t.roundOf16} side="left" lang={lang} t={t} />
+        <BracketColumn ids={[97, 99]} matchesById={matchesById} round="qf" title={t.quarterfinals} side="left" lang={lang} t={t} />
+        <BracketColumn ids={[101]} matchesById={matchesById} round="sf" title={t.semifinals} side="left" lang={lang} t={t} />
+
+        <section className="bracket-center" dir={t.dir}>
+          <div className="bracket-center-match final-match">
+            <h3>{t.final}</h3>
+            <BracketMatchCard match={matchesById.get(104)} lang={lang} t={t} />
+          </div>
+          <div className="bracket-trophy" aria-hidden="true"><span>MP</span></div>
+          <div className="bracket-center-match third-match">
+            <h3>{t.thirdPlace}</h3>
+            <BracketMatchCard match={matchesById.get(103)} lang={lang} t={t} />
+          </div>
+        </section>
+
+        <BracketColumn ids={[102]} matchesById={matchesById} round="sf" title={t.semifinals} side="right" lang={lang} t={t} />
+        <BracketColumn ids={[98, 100]} matchesById={matchesById} round="qf" title={t.quarterfinals} side="right" lang={lang} t={t} />
+        <BracketColumn ids={[93, 94, 95, 96]} matchesById={matchesById} round="r16" title={t.roundOf16} side="right" lang={lang} t={t} />
+        <BracketColumn ids={[83, 84, 81, 82, 86, 88, 85, 87]} matchesById={matchesById} round="r32" title={t.roundOf32} side="right" lang={lang} t={t} />
+      </div>
+    </div>
   );
 }
 
@@ -1566,6 +1675,25 @@ function App() {
         </section>
       )}
 
+      {activeTab === "bracket" && (
+        <section className="section bracket-section">
+          <div className="bracket-heading" dir={t.dir}>
+            <div>
+              <span className="bracket-kicker">MATCHPULSE 2026</span>
+              <h2>{t.bracketTitle}</h2>
+              <p>{t.bracketSubtitle}</p>
+            </div>
+            <span className="bracket-heading-mark" aria-hidden="true">MP</span>
+          </div>
+
+          {isLoadingMatches && <p className="bracket-message">{t.loadingMatches}</p>}
+          {!isLoadingMatches && matchesError && <p className="bracket-message">{matchesError}</p>}
+          {!isLoadingMatches && !matchesError && (
+            <KnockoutBracket matches={matches} lang={lang} t={t} />
+          )}
+        </section>
+      )}
+
       {activeTab === "news" && (
         <section className="section">
           <div className="section-header">
@@ -1758,6 +1886,13 @@ function App() {
           onClick={() => setActiveTab("past")}
         >
           🏁 {t.past}
+        </button>
+
+        <button
+          className={activeTab === "bracket" ? "active" : ""}
+          onClick={() => setActiveTab("bracket")}
+        >
+          ◇ {t.bracket}
         </button>
 
         <button
