@@ -80,15 +80,23 @@
   font-family: "Vazirmatn", "Vazir", "IRANSans", "B Yekan", "B Nazanin", "Tahoma", system-ui, sans-serif;
 }
 
+html,
+body,
+#root {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow-x: hidden;
+}
+
 html {
   background: var(--bg);
-  overflow-x: hidden;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
-  overflow-x: hidden;
   background:
     radial-gradient(circle at 12% -8%, rgba(var(--theme-secondary-rgb), 0.16), transparent 34%),
     radial-gradient(circle at 90% 2%, rgba(var(--theme-accent-rgb), 0.1), transparent 32%),
@@ -106,16 +114,23 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+#root {
+  min-height: 100vh;
+}
+
 button {
   font: inherit;
   letter-spacing: inherit;
 }
 
 .app {
+  width: 100%;
   min-height: 100vh;
   max-width: 520px;
+  min-width: 0;
   margin: 0 auto;
   padding: 18px 16px 120px;
+  overflow-x: hidden;
 }
 
 .hero {
@@ -395,6 +410,9 @@ h1 {
 }
 
 .section {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   margin-top: 24px;
 }
 
@@ -1128,11 +1146,12 @@ h1 {
 }
 
 .bracket-scroll {
+  display: block;
   width: 100%;
   max-width: 100%;
   min-width: 0;
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: visible;
   padding: 4px 12px 18px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 20px;
@@ -1154,6 +1173,7 @@ h1 {
   gap: 18px;
   width: max-content;
   min-width: 1668px;
+  max-width: none;
   height: 1090px;
   margin-inline: auto;
   padding: 16px 18px 22px;
@@ -1413,14 +1433,19 @@ h1 {
 
 .bottom-nav {
   position: fixed;
-  left: 50%;
+  right: 11px;
+  left: 11px;
   bottom: 12px;
-  transform: translateX(-50%);
+  transform: none;
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 5px;
-  width: min(520px, calc(100% - 22px));
+  width: auto;
+  max-width: 498px;
+  min-width: 0;
+  margin-inline: auto;
   padding: 7px;
+  overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 22px;
   background: rgba(6, 9, 24, 0.9);
@@ -2090,14 +2115,19 @@ h1 {
   }
 
   .bottom-nav button {
-    min-width: 58px;
+    min-width: 0;
     font-size: 9px;
   }
 
   .bottom-nav {
-    overflow-x: auto;
-    grid-template-columns: repeat(7, minmax(58px, 1fr));
-    justify-content: start;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+
+  .bracket-section {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .bracket-heading {
@@ -2119,7 +2149,17 @@ h1 {
   }
 
   .bracket-scroll {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
     border-radius: 16px;
+  }
+
+  .bracket-board {
+    width: max-content;
+    max-width: none;
+    margin-inline: 0;
   }
 
   .match-meta-grid,
