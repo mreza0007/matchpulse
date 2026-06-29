@@ -18,7 +18,7 @@ VARZESH3_MATCH_MAP_PATH = DATA_DIR / "varzesh3-match-map.json"
 VARZESH_EVENT_TYPES = {
     1: "goal",
     2: "yellow_card",
-    3: "penalty_goal",
+    3: "penalty_event",
     4: "substitution",
     5: "var_disallowed_goal",
     6: "var",
@@ -323,6 +323,7 @@ STAGE_LABELS = {
     "3rd": "Third",
     "final": "Final",
 }
+SCORING_EVENT_TYPES = {"goal", "own_goal", "penalty_goal"}
 
 
 def resolve_stage(match):
@@ -1191,7 +1192,7 @@ def normalize_event_type(event):
         return " ".join(values).strip().lower()
 
     text = all_event_text()
-    raw_event_type = coerce_int(first_layer_value(("eventType",)))
+    raw_event_type = coerce_int(first_layer_value(("eventType", "raw_type")))
     card_type = coerce_int(first_layer_value(("cardType", "card_type")))
 
     if (
@@ -1220,7 +1221,7 @@ def normalize_event_type(event):
         "red": "red_card",
         "redcard": "red_card",
         "card_red": "red_card",
-        "penalty": "penalty_goal",
+        "penalty": "penalty_event",
         "missed_penalty": "penalty_missed",
         "var_disallowed": "var_disallowed_goal",
         "disallowed_var_goal": "var_disallowed_goal",
@@ -1239,6 +1240,7 @@ def normalize_event_type(event):
         "substitution",
         "var",
         "penalty_goal",
+        "penalty_event",
         "own_goal",
         "var_disallowed_goal",
         "disallowed_goal",
@@ -1308,6 +1310,7 @@ def normalize_event(event):
         side = ""
 
     normalized_type = normalize_event_type(event)
+    raw_type = first_value(event, ("raw_type", "eventType", "event_type_code"))
     description = repair_text(first_value(event, ("description", "title", "label")))
     player = repair_text(
         first_value(
@@ -1353,7 +1356,9 @@ def normalize_event(event):
         "raw_minute": raw_minute,
         "display_minute": raw_minute,
         "type": normalized_type,
+        "raw_type": raw_type,
         "normalized_type": normalized_type,
+        "is_scoring_event": normalized_type in SCORING_EVENT_TYPES,
         "team": side,
         "team_side": side,
         "team_name": repair_text(first_value(event, ("team_name", "teamName"))),
@@ -1390,7 +1395,7 @@ def normalize_provider_event(event, index):
     side_value = event.get("side")
     side = "home" if side_value == 0 else "away" if side_value == 1 else ""
     event_type_value = event.get("eventType", event.get("type"))
-    normalized_type = VARZESH_EVENT_TYPES.get(event_type_value) or VARZESH_EVENT_TYPES.get(coerce_int(event_type_value))
+    normalized_type = normalize_event_type(event)
     player_object = event.get("player") if isinstance(event.get("player"), dict) else {}
     assist_object = event.get("assist") if isinstance(event.get("assist"), dict) else {}
     player = (
@@ -1413,7 +1418,9 @@ def normalize_provider_event(event, index):
         "raw_minute": event.get("time") or event.get("minute") or event.get("eventTime"),
         "event_type": normalized_type or event_type_value,
         "type": normalized_type or event_type_value,
+        "raw_type": event_type_value,
         "normalized_type": normalized_type,
+        "is_scoring_event": normalized_type in SCORING_EVENT_TYPES,
         "team_side": side,
         "side": side,
         "player": player,
@@ -1432,7 +1439,7 @@ def count_goal_events_by_side(events):
     for event in events:
         event_type = event.get("normalized_type") or event.get("type")
 
-        if event_type not in {"goal", "penalty_goal"}:
+        if event_type not in SCORING_EVENT_TYPES:
             continue
 
         side = str(event.get("team_side") or event.get("team") or "").strip().lower()

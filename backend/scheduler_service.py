@@ -400,7 +400,16 @@ def load_events(match_id_value):
         return []
 
     if isinstance(payload, dict):
-        return payload.get("events") or []
+        provider = payload.get("provider")
+        external_match_id = payload.get("external_match_id")
+        events = payload.get("events") or []
+
+        for event in events:
+            if isinstance(event, dict):
+                event.setdefault("provider", provider)
+                event.setdefault("external_match_id", external_match_id)
+
+        return events
 
     return payload if isinstance(payload, list) else []
 
@@ -419,6 +428,15 @@ def clean_value(value):
 
 def live_event_type(event):
     return clean_value(event.get("normalized_type") or event.get("event_type") or event.get("type")).lower().replace("-", "_")
+
+
+def is_scoring_event(event):
+    explicit = event.get("is_scoring_event")
+
+    if explicit is True or str(explicit).strip().lower() in {"true", "1", "yes"}:
+        return True
+
+    return live_event_type(event) in {"goal", "own_goal", "penalty_goal"}
 
 
 def is_live_match(match):
@@ -503,18 +521,26 @@ def event_score_token(match):
 
 
 def live_event_key(match, event, notification_type):
+    provider = normalize_team_key(event.get("provider") or match.get("provider") or "worldcup2026")
+    external_match_id = clean_value(
+        event.get("external_match_id")
+        or match.get("external_match_id")
+        or match.get("raw_provider_match_id")
+        or match_id(match)
+    )
     raw_id = clean_value(event.get("id") or event.get("event_id") or event.get("eventId"))
 
     if raw_id:
-        return f"{notification_type}:event_{raw_id}"
+        return f"{provider}:match_{external_match_id}:event_{raw_id}"
 
     side = scoring_side(event, match) or clean_value(event.get("team_side") or event.get("team") or event.get("side"))
     team = team_display(match, side) if side in {"home", "away"} else {"key": normalize_team_key(side)}
     player = normalize_team_key(event_player(event))
     minute = clean_value(event.get("display_minute") or event.get("raw_minute") or event.get("minute") or event.get("time"))
+    event_type = live_event_type(event) or "unknown"
 
     return (
-        f"{notification_type}:match_{match_id(match)}:"
+        f"{provider}:match_{external_match_id}:type_{event_type}:"
         f"min_{normalize_team_key(minute) or 'unknown'}:"
         f"team_{team['key'] or 'unknown'}:"
         f"player_{player or 'unknown'}:"
@@ -605,6 +631,25 @@ def send_live_notification_once(bot_app, telegram_id, match, notification_type, 
     if has_live_notification_been_sent(telegram_id, match_id_value, notification_type, event_key):
         return False
 
+    event_marker = ":event_"
+    if event_marker in event_key:
+        raw_event_id = event_key.rsplit(event_marker, 1)[1]
+        legacy_event_key = f"{notification_type}:event_{raw_event_id}"
+
+        if has_live_notification_been_sent(
+            telegram_id,
+            match_id_value,
+            notification_type,
+            legacy_event_key,
+        ):
+            mark_live_notification_sent(
+                telegram_id,
+                match_id_value,
+                notification_type,
+                event_key,
+            )
+            return False
+
     if notification_dry_run():
         print(
             "DRY RUN live notification "
@@ -684,7 +729,7 @@ def check_live_match_notifications_once():
         for event in events:
             event_type = live_event_type(event)
 
-            if event_type in {"goal", "penalty_goal", "own_goal"}:
+            if is_scoring_event(event):
                 notify_relevant_users(
                     bot_app,
                     match,
