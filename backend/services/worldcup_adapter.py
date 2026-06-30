@@ -595,6 +595,12 @@ def source_timezone_for_match(match):
 
 
 def parse_match_datetime(match):
+    for key in ("kickoff_utc", "kickoff", "kickoff_iso", "datetime", "start_time"):
+        parsed = parse_iso_datetime(match.get(key))
+
+        if parsed is not None:
+            return parsed
+
     local_datetime = first_value(
         match,
         ("datetime_iran", "local_datetime", "localDateTime", "date_time", "dateTime"),
@@ -604,7 +610,12 @@ def parse_match_datetime(match):
         ("local_date", "localDate", "date_iran", "persian_date", "date", "match_date"),
     )
     local_time = first_value(match, ("time_iran", "local_time", "localTime", "time"))
-    source_timezone = source_timezone_for_match(match)
+    has_wrapper_iran_time = bool(
+        match.get("datetime_iran")
+        or match.get("date_iran")
+        or match.get("time_iran")
+    )
+    source_timezone = TEHRAN_TZ if has_wrapper_iran_time else source_timezone_for_match(match)
 
     if local_datetime and not local_date:
         local_date = local_datetime
@@ -618,7 +629,7 @@ def parse_match_datetime(match):
             parsed_date = parse_numeric_date(local_date, prefer_jalali=True)
 
     if parsed_date is None:
-        for key in ("kickoff_iso", "kickoff_utc", "kickoff", "datetime", "start_time", "date"):
+        for key in ("date",):
             parsed = parse_iso_datetime(match.get(key))
 
             if parsed is not None:
@@ -1652,14 +1663,26 @@ def normalize_match(match):
     home_flag = match.get("home_flag") or match.get("home_team_flag") or ""
     away_flag = match.get("away_flag") or match.get("away_team_flag") or ""
     stage, stage_label = resolve_stage(match)
+    wrapper_kickoff = match.get("kickoff")
+    wrapper_kickoff_utc = match.get("kickoff_utc")
+    wrapper_kickoff_iso = match.get("kickoff_iso") or wrapper_kickoff
+    wrapper_date = match.get("date")
+    wrapper_date_iran = match.get("date_iran")
+    wrapper_time_iran = match.get("time_iran")
+    wrapper_datetime_iran = match.get("datetime_iran")
     kickoff_utc = parse_match_datetime(match)
     kickoff_tehran = kickoff_utc.astimezone(TEHRAN_TZ) if kickoff_utc else None
-    kickoff_iso = kickoff_tehran.isoformat() if kickoff_tehran else ""
-    kickoff_utc_iso = kickoff_utc.isoformat().replace("+00:00", "Z") if kickoff_utc else ""
-    date_label_fa = match.get("date_label_fa") or format_date_label_fa(
+    fallback_kickoff_iso = kickoff_tehran.isoformat() if kickoff_tehran else ""
+    fallback_kickoff_utc_iso = kickoff_utc.isoformat().replace("+00:00", "Z") if kickoff_utc else ""
+    date_iran = wrapper_date_iran or format_date_label_fa(
         kickoff_utc,
-        match.get("date_iran") or match.get("persian_date") or "",
+        match.get("persian_date") or "",
     )
+    time_iran = wrapper_time_iran or format_tehran_time(kickoff_utc) or ""
+    datetime_iran = wrapper_datetime_iran or (
+        f"{date_iran} {time_iran}" if date_iran and time_iran else ""
+    )
+    date_label_fa = match.get("date_label_fa") or date_iran
     weekday_fa = match.get("weekday_fa") or format_weekday_fa(kickoff_utc)
     date_key = kickoff_date_key(kickoff_utc)
     should_debug_status = normalized_match_id in range(45, 61)
@@ -1725,21 +1748,21 @@ def normalize_match(match):
         "events": normalize_events(match.get("events") or []),
         "score_source": score_source if score_source != "unresolved" else "worldcup_wrapper",
         "needs_score_sync": score_source == "unresolved" and kickoff_is_safely_past(match) and raw_score_is_placeholder(match),
-        "kickoff": kickoff_iso or match.get("kickoff") or match.get("kickoff_utc") or "",
-        "kickoff_utc": kickoff_utc_iso or match.get("kickoff_utc") or match.get("kickoff") or "",
-        "kickoff_iso": kickoff_iso,
+        "kickoff": wrapper_kickoff or wrapper_kickoff_utc or fallback_kickoff_iso,
+        "kickoff_utc": wrapper_kickoff_utc or wrapper_kickoff or fallback_kickoff_utc_iso,
+        "kickoff_iso": wrapper_kickoff_iso or fallback_kickoff_iso,
         "kickoff_ts": int(kickoff_utc.timestamp()) if kickoff_utc else None,
         "kickoff_timestamp": int(kickoff_utc.timestamp()) if kickoff_utc else None,
         "date_key": date_key,
-        "date": match.get("date") or "",
+        "date": wrapper_date or "",
         "local_date": match.get("local_date") or match.get("localDate") or "",
         "source_timezone": source_timezone_for_match(match).key,
         "stadium_id": match.get("stadium_id") or match.get("stadiumId") or "",
-        "date_iran": date_label_fa,
+        "date_iran": date_iran,
         "date_label_fa": date_label_fa,
         "weekday_fa": weekday_fa,
-        "time_iran": format_tehran_time(kickoff_utc) or match.get("time_iran") or "",
-        "datetime_iran": match.get("datetime_iran") or "",
+        "time_iran": time_iran,
+        "datetime_iran": datetime_iran,
         "group": match.get("group") or "",
         "stage": stage,
         "stage_label": stage_label,
