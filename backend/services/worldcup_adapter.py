@@ -176,6 +176,21 @@ def fetch_json(path):
         return None
 
 
+def fetch_json_with_error(path):
+    url = build_url(path)
+
+    if not url:
+        return None, "WORLDCUP_WRAPPER_URL is not configured"
+
+    try:
+        response = requests.get(url, timeout=get_timeout_seconds())
+        response.raise_for_status()
+        return response.json(), None
+    except Exception as error:
+        warn(f"Request failed for {url}: {error}")
+        return None, str(error)
+
+
 def payload_debug_summary(payload):
     if isinstance(payload, list):
         return {"type": "list", "count": len(payload)}
@@ -2204,6 +2219,22 @@ def fetch_events_from_wrapper(match_id, metadata_match=None):
     return []
 
 
+def fetch_events_payload_on_demand(match_id):
+    payload, request_error = fetch_json_with_error(f"/match/{match_id}/events")
+    raw_events = raw_events_from_payload(payload)
+    events = normalize_events(raw_events)
+    warning = payload.get("warning") if isinstance(payload, dict) else None
+    wrapper_error = payload.get("error") if isinstance(payload, dict) else None
+
+    return {
+        "events": events,
+        "warning": warning,
+        "error": wrapper_error or request_error,
+        "external_match_id": payload.get("external_match_id") if isinstance(payload, dict) else None,
+        "provider": payload.get("provider") if isinstance(payload, dict) else None,
+    }
+
+
 def refresh_cache():
     matches = apply_local_score_overrides(fetch_matches_from_wrapper())
     finished_count = sum(1 for match in matches if match.get("is_finished") is True)
@@ -2216,13 +2247,21 @@ def refresh_cache():
         source = match.get("score_source") or "unknown"
         score_sources[source] = score_sources.get(source, 0) + 1
 
-    events = {
-        match["id"]: match.get("events") or []
-        for match in matches
-        if match.get("id") is not None
-    }
-
     with _cache_lock:
+        events = dict(_cache.get("events") or {})
+
+        for match in matches:
+            match_id = match.get("id")
+            refreshed_events = match.get("events") or []
+
+            if match_id is None:
+                continue
+
+            if refreshed_events:
+                events[match_id] = refreshed_events
+            elif match_id not in events:
+                events[match_id] = []
+
         _cache["matches"] = matches
         _cache["events"] = events
         _cache["last_refresh"] = time.time()
@@ -2325,17 +2364,49 @@ def get_match_events_from_worldcup_wrapper(match_id):
 
     if metadata_match:
         external_match_id = metadata_match.get("external_match_id") or metadata_match.get("raw_provider_match_id") or None
-    events = fetch_events_from_wrapper(normalized_match_id, metadata_match)
+    fetched = fetch_events_payload_on_demand(normalized_match_id)
+    events = fetched["events"]
+    warning = fetched.get("warning")
+    error = fetched.get("error")
+    stale = False
+
+    print(
+        f"[MATCH_EVENTS_FETCH] match_id={normalized_match_id} "
+        f"events={len(events)} warning={warning or ''} error={error or ''}"
+    )
 
     with _cache_lock:
-        _cache["events"][normalized_match_id] = events
+        cached_events = list(_cache["events"].get(normalized_match_id) or [])
 
-    return {
+        if events:
+            _cache["events"][normalized_match_id] = events
+        elif (warning or error) and cached_events:
+            events = cached_events
+            stale = True
+
+    if stale:
+        print(
+            f"[MATCH_EVENTS_CACHE_FALLBACK] match_id={normalized_match_id} "
+            f"cached_events={len(events)}"
+        )
+
+    response = {
         "match_id": normalized_match_id,
-        "external_match_id": external_match_id,
-        "provider": metadata_match.get("provider") if metadata_match else None,
+        "external_match_id": fetched.get("external_match_id") or external_match_id,
+        "provider": fetched.get("provider") or (metadata_match.get("provider") if metadata_match else None),
         "events": events,
     }
+
+    if warning:
+        response["warning"] = warning
+
+    if error:
+        response["error"] = error
+
+    if stale:
+        response["stale"] = True
+
+    return response
 
 
 def get_teams_from_worldcup_wrapper():

@@ -381,8 +381,9 @@ const translations = {
     scorePending: "نتیجه هنوز ثبت نشده",
     matchEvents: "رویدادها",
     loadingEvents: "در حال دریافت رویدادها...",
-    noEvents: "رویدادی برای این بازی ثبت نشده یا در منبع فعلی در دسترس نیست",
-    eventSourceUnavailable: "رویدادی برای این بازی ثبت نشده یا در منبع فعلی در دسترس نیست",
+    noEvents: "رویدادی برای این بازی ثبت نشده است.",
+    eventSourceUnavailable: "رویدادها فعلاً از منبع داده دریافت نشدند.",
+    eventRequestFailed: "دریافت رویدادها ناموفق بود.",
     viewEvents: "مشاهده رویدادها",
     assistLabel: "پاس گل",
     playerInLabel: "",
@@ -467,8 +468,9 @@ const translations = {
     scorePending: "Score not recorded yet",
     matchEvents: "Events",
     loadingEvents: "Loading timeline...",
-    noEvents: "No event is recorded for this match or available from the current source.",
-    eventSourceUnavailable: "No event is recorded for this match or available from the current source.",
+    noEvents: "No events recorded for this match.",
+    eventSourceUnavailable: "Events are temporarily unavailable from the data source.",
+    eventRequestFailed: "Failed to load events.",
     viewEvents: "View events",
     assistLabel: "Assist",
     playerInLabel: "",
@@ -736,6 +738,7 @@ function MatchCard({
   events = [],
   isLoadingEvents = false,
   eventsUnavailable = false,
+  eventsFailed = false,
   isScoreChanged = false,
 }) {
   const matchStatus = getMatchStatus(match, t);
@@ -848,6 +851,8 @@ function MatchCard({
           <h3>{t.matchEvents}</h3>
           {isLoadingEvents ? (
             <p>{t.loadingEvents}</p>
+          ) : eventsFailed ? (
+            <p>{t.eventRequestFailed}</p>
           ) : eventsUnavailable ? (
             <p>{t.eventSourceUnavailable}</p>
           ) : events.length > 0 ? (
@@ -1039,6 +1044,7 @@ function App() {
   const [selectedMatchId, setSelectedMatchId] = useState(null);
   const [matchEventsById, setMatchEventsById] = useState({});
   const [eventUnavailableMatchIds, setEventUnavailableMatchIds] = useState(() => new Set());
+  const [eventFailedMatchIds, setEventFailedMatchIds] = useState(() => new Set());
   const [loadingEventsId, setLoadingEventsId] = useState(null);
   const [scoreChangedMatchIds, setScoreChangedMatchIds] = useState(() => new Set());
   const scoreChangeTimeouts = useRef(new Map());
@@ -1464,9 +1470,14 @@ function App() {
 
     setSelectedMatchId((currentId) => (currentId === match.id ? null : match.id));
 
-    if (matchEventsById[match.id]) return;
+    if ((matchEventsById[match.id] || []).length > 0) return;
 
     setEventUnavailableMatchIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+      nextIds.delete(match.id);
+      return nextIds;
+    });
+    setEventFailedMatchIds((currentIds) => {
       const nextIds = new Set(currentIds);
       nextIds.delete(match.id);
       return nextIds;
@@ -1481,14 +1492,19 @@ function App() {
         return response.json();
       })
       .then((data) => {
+        const events = Array.isArray(data.events) ? data.events : [];
         setMatchEventsById((currentEvents) => ({
           ...currentEvents,
-          [match.id]: Array.isArray(data.events) ? data.events : [],
+          [match.id]: events,
         }));
+
+        if (events.length === 0 && (data.warning || data.error)) {
+          setEventUnavailableMatchIds((currentIds) => new Set(currentIds).add(match.id));
+        }
       })
       .catch((error) => {
         console.error("Failed to load match events:", error);
-        setEventUnavailableMatchIds((currentIds) => new Set(currentIds).add(match.id));
+        setEventFailedMatchIds((currentIds) => new Set(currentIds).add(match.id));
       })
       .finally(() => setLoadingEventsId(null));
   };
@@ -1544,6 +1560,7 @@ function App() {
         events={matchEventsById[match.id] || []}
         isLoadingEvents={loadingEventsId === match.id}
         eventsUnavailable={eventUnavailableMatchIds.has(match.id)}
+        eventsFailed={eventFailedMatchIds.has(match.id)}
         isScoreChanged={scoreChangedMatchIds.has(match.id)}
         {...options}
       />
@@ -1639,6 +1656,8 @@ function App() {
                         <h3>{t.matchEvents}</h3>
                         {loadingEventsId === match.id ? (
                           <p>{t.loadingEvents}</p>
+                        ) : eventFailedMatchIds.has(match.id) ? (
+                          <p>{t.eventRequestFailed}</p>
                         ) : eventUnavailableMatchIds.has(match.id) ? (
                           <p>{t.eventSourceUnavailable}</p>
                         ) : (matchEventsById[match.id] || []).length > 0 ? (

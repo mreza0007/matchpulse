@@ -137,6 +137,7 @@ def get_matches(status: str = Query("all")):
 
 
 @api.get("/match/{match_id}/events")
+@api.get("/matches/{match_id}/events")
 def get_events(match_id: int):
     return get_match_events(match_id)
 
