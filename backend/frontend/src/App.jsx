@@ -476,10 +476,12 @@ const EVENT_LABELS = {
   fa: {
     goal: "\u06af\u0644",
     penalty_goal: "\u06af\u0644 \u067e\u0646\u0627\u0644\u062a\u06cc",
+    penalty_event: "\u0631\u0648\u06cc\u062f\u0627\u062f \u067e\u0646\u0627\u0644\u062a\u06cc",
     own_goal: "\u06af\u0644 \u0628\u0647 \u062e\u0648\u062f\u06cc",
     var_disallowed_goal: "\u06af\u0644 \u0645\u0631\u062f\u0648\u062f \u0628\u0627 VAR",
     disallowed_goal: "\u06af\u0644 \u0645\u0631\u062f\u0648\u062f \u0628\u0627 VAR",
-    penalty_missed: "\u067e\u0646\u0627\u0644\u062a\u06cc \u0627\u0632 \u062f\u0633\u062a \u0631\u0641\u062a\u0647",
+    penalty_missed: "\u067e\u0646\u0627\u0644\u062a\u06cc \u062e\u0631\u0627\u0628\u200c\u0634\u062f\u0647",
+    missed_penalty: "\u067e\u0646\u0627\u0644\u062a\u06cc \u062e\u0631\u0627\u0628\u200c\u0634\u062f\u0647",
     assist: "\u067e\u0627\u0633 \u06af\u0644",
     yellow_card: "\u06a9\u0627\u0631\u062a \u0632\u0631\u062f",
     red_card: "\u06a9\u0627\u0631\u062a \u0642\u0631\u0645\u0632",
@@ -490,10 +492,12 @@ const EVENT_LABELS = {
   en: {
     goal: "Goal",
     penalty_goal: "Penalty goal",
+    penalty_event: "Penalty event",
     own_goal: "Own goal",
     var_disallowed_goal: "VAR-disallowed goal",
     disallowed_goal: "VAR-disallowed goal",
     penalty_missed: "Missed penalty",
+    missed_penalty: "Missed penalty",
     assist: "Assist",
     yellow_card: "Yellow card",
     red_card: "Red card",
@@ -504,7 +508,7 @@ const EVENT_LABELS = {
 };
 
 function getEventTypeLabel(type, lang) {
-  return EVENT_LABELS[lang]?.[type] || type || "";
+  return EVENT_LABELS[lang]?.[type] || EVENT_LABELS[lang]?.unknown || "Event";
 }
 
 function getEventIcon(type) {
@@ -596,9 +600,11 @@ function getRenderedEventIcon(type) {
     goal: "\u26bd",
     penalty_goal: "\u26bd",
     own_goal: "\u26bd\u21a9\ufe0f",
-    var_disallowed_goal: "\u274c",
-    disallowed_goal: "\u274c",
+    var_disallowed_goal: "\ud83d\udcf9",
+    disallowed_goal: "\ud83d\udcf9",
+    penalty_event: "\u26aa",
     penalty_missed: "\u274c",
+    missed_penalty: "\u274c",
     yellow_card: "\ud83d\udfe8",
     red_card: "\ud83d\udfe5",
     substitution: "\ud83d\udd01",
@@ -614,8 +620,9 @@ function EventRow({ event, match, lang, t, index }) {
   const assist = getFirstEventValue(event, ["assist", "assist_name", "assistName"]);
   const playerIn = getFirstEventValue(event, ["player_in", "playerIn", "in_player"]);
   const playerOut = getFirstEventValue(event, ["player_out", "playerOut", "out_player"]);
-  const title = getEventTypeLabel(type, lang) || event.description || type;
-  const eventIcon = getRenderedEventIcon(type);
+  const providedLabel = lang === "fa" ? event.label_fa : event.label_en;
+  const title = providedLabel || getEventTypeLabel(type, lang);
+  const eventIcon = event.icon || getRenderedEventIcon(type);
   const key = [eventMinute, type, player, playerIn, playerOut, index].join("-");
 
   return (
@@ -648,6 +655,35 @@ function EventRow({ event, match, lang, t, index }) {
   );
 }
 
+function toPersianDigits(value) {
+  const digits = "\u06f0\u06f1\u06f2\u06f3\u06f4\u06f5\u06f6\u06f7\u06f8\u06f9";
+  return String(value ?? "").replace(/\d/g, (digit) => digits[Number(digit)]);
+}
+
+function getPenaltySummary(match, lang) {
+  const providedSummary = lang === "fa" ? match?.penalty_summary_fa : match?.penalty_summary_en;
+  if (providedSummary) return providedSummary;
+
+  const hasShootout = match?.win_method === "penalty_shootout" ||
+    (match?.home_penalty_score != null && match?.away_penalty_score != null);
+  if (!hasShootout) return "";
+
+  const winnerSide = match.penalty_winner_side;
+  const winnerName = lang === "fa"
+    ? match.penalty_winner_fa || getLocalizedTeamName(match, winnerSide, "fa")
+    : match.penalty_winner_en || getLocalizedTeamName(match, winnerSide, "en");
+
+  if (!winnerName) return lang === "fa" ? "پیروزی در ضربات پنالتی" : "Won on penalties";
+  if (lang === "en") return `${winnerName} won on penalties`;
+
+  const winnerScore = winnerSide === "home" ? match.home_penalty_score : match.away_penalty_score;
+  const loserScore = winnerSide === "home" ? match.away_penalty_score : match.home_penalty_score;
+  const scoreText = winnerScore != null && loserScore != null
+    ? ` ${toPersianDigits(winnerScore)} - ${toPersianDigits(loserScore)}`
+    : "";
+  return `${winnerName} در ضربات پنالتی${scoreText} پیروز شد`;
+}
+
 function MatchCard({
   match,
   t,
@@ -678,6 +714,7 @@ function MatchCard({
   const awayName = getLocalizedTeamName(match, "away", lang);
   const shouldShowScoreFallback = !matchScore && ["finished", "pending_result"].includes(matchStatus.key);
   const matchDateTime = formatTehranMatchDateTime(match, lang);
+  const penaltySummary = getPenaltySummary(match, lang);
   const canViewEvents = canShowEvents(match);
   const stopCardClick = (event) => event.stopPropagation();
   const renderTeamName = (name, flag, englishName, team) => {
@@ -733,6 +770,8 @@ function MatchCard({
         </span>
         {renderTeamName(awayName, match.away_flag, match.away_en, awayTeam)}
       </div>
+
+      {penaltySummary && <p className="penalty-summary">{penaltySummary}</p>}
 
       <div className="match-meta-grid">
         <span>🕒 {matchDateTime.time}</span>
@@ -806,10 +845,11 @@ function BracketMatchCard({ match, lang, t }) {
   const showScore = ["live", "finished"].includes(status.key);
   const homeName = getLocalizedTeamName(match, "home", lang) || match.home_team_label || t.unavailable;
   const awayName = getLocalizedTeamName(match, "away", lang) || match.away_team_label || t.unavailable;
+  const penaltySummary = getPenaltySummary(match, lang);
 
   return (
     <article
-      className={`bracket-match ${status.key === "live" ? "is-live" : ""} ${status.key === "finished" ? "is-finished" : ""}`}
+      className={`bracket-match ${status.key === "live" ? "is-live" : ""} ${status.key === "finished" ? "is-finished" : ""} ${penaltySummary ? "has-penalties" : ""}`}
       dir={t.dir}
     >
       <header className="bracket-match-meta">
@@ -828,6 +868,8 @@ function BracketMatchCard({ match, lang, t }) {
         <strong title={awayName}>{awayName}</strong>
         <b>{showScore ? getScoreValue(match, ["away_score", "awayScore"]) ?? "—" : ""}</b>
       </div>
+
+      {penaltySummary && <p className="bracket-penalty-summary">{penaltySummary}</p>}
 
       {showScore && score && <span className="bracket-score-summary">{score}</span>}
       <span className="bracket-match-number">#{match.id}</span>
