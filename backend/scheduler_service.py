@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -20,6 +21,7 @@ DEFAULT_BALL = "\u26bd"
 DEFAULT_STAR = "\u2b50"
 
 scheduler = BackgroundScheduler()
+pending_final_confirmations = {}
 
 scheduler_state = {
     "bot_app": None,
@@ -245,11 +247,91 @@ def match_has_started(match):
 
 
 def match_is_finished(match):
+    return is_definitely_finished(match)
+
+
+def is_active_or_transitional(match):
+    if match.get("is_live") is True:
+        return True
+
+    status_values = provider_status_values(match)
+    active_statuses = {
+        "live",
+        "in_progress",
+        "ongoing",
+        "1h",
+        "2h",
+        "ht",
+        "halftime",
+        "half_time",
+        "break",
+        "et",
+        "extra_time",
+        "penalties",
+        "penalty",
+        "penalty_shootout",
+        "shootout",
+        "pending_result",
+        "scheduled",
+        "upcoming",
+        "notstarted",
+        "not_started",
+    }
+
+    if status_values.intersection(active_statuses):
+        return True
+
+    title_text = " ".join(
+        str(value or "").strip().lower()
+        for value in (
+            match.get("status_title"),
+            match.get("live_badge"),
+            match.get("raw_live_badge"),
+            raw_provider_status(match).get("statusTitle"),
+            raw_provider_status(match).get("status_title"),
+        )
+        if value is not None
+    )
+    transitional_markers = (
+        "half time",
+        "halftime",
+        "break",
+        "extra time",
+        "penalty shootout",
+        "penalties",
+        "نیمه",
+        "استراحت",
+        "وقت اضافه",
+        "ضربات پنالتی",
+    )
+    return any(marker in title_text for marker in transitional_markers)
+
+
+def is_definitely_finished(match):
+    if is_active_or_transitional(match):
+        return False
+
+    if match.get("is_finished") is True or normalized_status(match) == "finished":
+        return True
+
+    if str(match.get("raw_live_badge") or "").strip().upper() == "FT":
+        return True
+
+    title_text = " ".join(
+        str(value or "").strip()
+        for value in (
+            match.get("status_title"),
+            raw_provider_status(match).get("statusTitle"),
+            raw_provider_status(match).get("status_title"),
+        )
+        if value is not None
+    )
+    lowered_title = title_text.lower()
     return (
-        match.get("is_finished") is True
-        or normalized_status(match) == "finished"
-        or "نتیجه نهایی" in str(raw_provider_status(match).get("statusTitle") or "")
-        or str(raw_provider_status(match).get("status") or "") == "7"
+        "نتیجه نهایی" in title_text
+        or "finished" in lowered_title
+        or "full time" in lowered_title
+        or re.search(r"\bft\b", lowered_title) is not None
     )
 
 
@@ -612,14 +694,79 @@ def build_red_card_message(match, event):
 
 
 def build_match_ended_message(match):
-    return "\n".join(
-        line
-        for line in (
-            "\u067e\u0627\u06cc\u0627\u0646 \u0628\u0627\u0632\u06cc",
-            live_score_line(match),
-        )
-        if clean_value(line)
+    return get_final_notification_text(match, "fa")
+
+
+def localized_team_name(match, side, lang):
+    if lang == "en":
+        return clean_value(match.get(f"{side}_en") or match.get(f"{side}_team") or match.get(f"{side}_fa"))
+
+    return clean_value(match.get(f"{side}_fa") or match.get(f"{side}_en") or match.get(f"{side}_team"))
+
+
+def final_score_line(match, lang):
+    score = match.get("score") if isinstance(match.get("score"), dict) else {}
+    home_score = match.get("home_score")
+    away_score = match.get("away_score")
+
+    if home_score is None:
+        home_score = score.get("home")
+
+    if away_score is None:
+        away_score = score.get("away")
+
+    if lang == "fa":
+        home_score = to_persian_digits(home_score)
+        away_score = to_persian_digits(away_score)
+
+    return (
+        f"{localized_team_name(match, 'home', lang)} "
+        f"{home_score} - {away_score} "
+        f"{localized_team_name(match, 'away', lang)}"
+    ).strip()
+
+
+def final_penalty_summary(match, lang):
+    provided = match.get("penalty_summary_en" if lang == "en" else "penalty_summary_fa")
+    if clean_value(provided):
+        return clean_value(provided)
+
+    if match.get("win_method") != "penalty_shootout":
+        return ""
+
+    winner_side = clean_value(match.get("penalty_winner_side")).lower()
+    winner_name = clean_value(
+        match.get("penalty_winner_en" if lang == "en" else "penalty_winner_fa")
     )
+
+    if not winner_name and winner_side in {"home", "away"}:
+        winner_name = localized_team_name(match, winner_side, lang)
+
+    if not winner_name:
+        return ""
+
+    if lang == "en":
+        return f"{winner_name} won on penalties"
+
+    winner_score = match.get("home_penalty_score" if winner_side == "home" else "away_penalty_score")
+    loser_score = match.get("away_penalty_score" if winner_side == "home" else "home_penalty_score")
+    score_text = ""
+
+    if winner_score is not None and loser_score is not None:
+        score_text = f" {to_persian_digits(winner_score)} - {to_persian_digits(loser_score)}"
+
+    return f"{winner_name} در ضربات پنالتی{score_text} پیروز شد"
+
+
+def get_final_notification_text(match, lang="fa"):
+    title = "Full Time" if lang == "en" else "پایان بازی"
+    lines = [title, final_score_line(match, lang)]
+    penalty_summary = final_penalty_summary(match, lang)
+
+    if penalty_summary:
+        lines.append(penalty_summary)
+
+    return "\n".join(line for line in lines if clean_value(line))
 
 
 def send_live_notification_once(bot_app, telegram_id, match, notification_type, event_key, text):
@@ -687,6 +834,104 @@ def notify_relevant_users(bot_app, match, notification_type, event_key, text):
         send_live_notification_once(bot_app, telegram_id, match, notification_type, event_key, text)
 
 
+def notify_favorite_users_final(bot_app, match):
+    favorites_by_user = get_all_favorite_teams_from_db()
+    users_by_id = {user["telegram_id"]: user for user in get_all_users()}
+    match_id_value = match_id(match)
+
+    for telegram_id, favorites in favorites_by_user.items():
+        if not user_favorite_for_match(favorites, match):
+            continue
+
+        language_code = str(users_by_id.get(telegram_id, {}).get("language_code") or "fa").lower()
+        lang = "en" if language_code.startswith("en") else "fa"
+        notification_key = f"final:{match_id_value}:{telegram_id}"
+        send_once(
+            bot_app,
+            telegram_id,
+            get_final_notification_text(match, lang),
+            notification_key,
+            match_id_value,
+            "confirmed match finish notification",
+        )
+
+
+def final_confirmation_score(match):
+    score = match.get("score") if isinstance(match.get("score"), dict) else {}
+    return (
+        match.get("home_score") if match.get("home_score") is not None else score.get("home"),
+        match.get("away_score") if match.get("away_score") is not None else score.get("away"),
+        match.get("home_penalty_score"),
+        match.get("away_penalty_score"),
+    )
+
+
+def reset_final_confirmation(match_id_value, reason):
+    if pending_final_confirmations.pop(match_id_value, None) is not None:
+        print(f"[FINAL_NOTIFY_RESET] match_id={match_id_value} reason={reason}")
+
+
+def process_final_confirmations(matches, bot_app):
+    present_match_ids = set()
+
+    for match in matches:
+        match_id_value = match_id(match)
+
+        if match_id_value is None:
+            continue
+
+        present_match_ids.add(match_id_value)
+
+        if not is_definitely_finished(match):
+            reset_final_confirmation(match_id_value, "active_or_not_final")
+            continue
+
+        if not has_final_score(match):
+            reset_final_confirmation(match_id_value, "missing_final_score")
+            continue
+
+        if not match_is_recently_finished(match):
+            reset_final_confirmation(match_id_value, "outside_recent_window")
+            continue
+
+        current_score = final_confirmation_score(match)
+        confirmation = pending_final_confirmations.get(match_id_value)
+
+        if confirmation is None:
+            pending_final_confirmations[match_id_value] = {
+                "first_seen_at": datetime.now(timezone.utc),
+                "last_score": current_score,
+                "count": 1,
+                "confirmed": False,
+            }
+            print(f"[FINAL_NOTIFY_CONFIRM] match_id={match_id_value} count=1")
+            continue
+
+        if confirmation["last_score"] != current_score:
+            print(f"[FINAL_NOTIFY_RESET] match_id={match_id_value} reason=score_changed")
+            confirmation.update({
+                "first_seen_at": datetime.now(timezone.utc),
+                "last_score": current_score,
+                "count": 1,
+                "confirmed": False,
+            })
+            print(f"[FINAL_NOTIFY_CONFIRM] match_id={match_id_value} count=1")
+            continue
+
+        if confirmation["confirmed"]:
+            continue
+
+        confirmation["count"] += 1
+
+        if confirmation["count"] >= 2:
+            confirmation["confirmed"] = True
+            print(f"[FINAL_NOTIFY_CONFIRMED] match_id={match_id_value} count={confirmation['count']}")
+            notify_favorite_users_final(bot_app, match)
+
+    for pending_match_id in set(pending_final_confirmations).difference(present_match_ids):
+        reset_final_confirmation(pending_match_id, "missing_from_wrapper_response")
+
+
 def check_live_match_notifications():
     try:
         check_live_match_notifications_once()
@@ -705,9 +950,9 @@ def check_live_match_notifications_once():
 
     matches = load_matches()
     live_matches = [match for match in matches if is_live_match(match)]
-    finished_matches = [match for match in matches if match_is_recently_finished(match)]
+    process_final_confirmations(matches, bot_app)
 
-    if not live_matches and not finished_matches:
+    if not live_matches:
         return
 
     for match in live_matches:
@@ -747,19 +992,6 @@ def check_live_match_notifications_once():
                     build_red_card_message(match, event),
                 )
 
-    for match in finished_matches:
-        if match_id(match) is None:
-            continue
-
-        notify_relevant_users(
-            bot_app,
-            match,
-            "match_ended",
-            "ended",
-            build_match_ended_message(match),
-        )
-
-
 def seed_existing_match_notification_state():
     if scheduler_state["seeded_existing_live_notifications"]:
         return
@@ -775,7 +1007,7 @@ def seed_existing_match_notification_state():
             continue
 
         is_started = match_has_started(match)
-        is_finished = match_is_finished(match) and has_final_score(match)
+        is_finished = is_definitely_finished(match) and has_final_score(match)
 
         if not is_started and not is_finished:
             continue
@@ -901,33 +1133,7 @@ def check_match_finished_notifications():
     if bot_app is None:
         return
 
-    users = get_all_users()
-    favorites_by_user = get_all_favorite_teams_from_db()
-
-    for match in load_matches():
-        match_id_value = match_id(match)
-
-        if not match_id_value or not match_is_finished(match) or not has_final_score(match):
-            continue
-
-        for user in users:
-            telegram_id = user["telegram_id"]
-            favorite = user_favorite_for_match(favorites_by_user.get(telegram_id, []), match)
-
-            if favorite:
-                key = user_finished_key(match, telegram_id, favorite)
-                if notification_already_handled(f"global_match_finished:{match_id_value}:{telegram_id}"):
-                    print(f"Skipped duplicate notification: {key}")
-                    continue
-                text = f"\U0001f3c6 \u0628\u0627\u0632\u06cc \u062a\u06cc\u0645 \u0645\u062d\u0628\u0648\u0628\u062a \u062a\u0645\u0627\u0645 \u0634\u062f\n{score_line(match)}"
-                send_once(bot_app, telegram_id, text, key, match_id_value, "match finish notification")
-            else:
-                key = f"global_match_finished:{match_id_value}:{telegram_id}"
-                if has_user_match_specific_notification("favorite_match_finished", match, telegram_id):
-                    print(f"Skipped duplicate notification: {key}")
-                    continue
-                text = f"\U0001f3c6 \u067e\u0627\u06cc\u0627\u0646 \u0628\u0627\u0632\u06cc\n{score_line(match)}"
-                send_once(bot_app, telegram_id, text, key, match_id_value, "match finish notification")
+    process_final_confirmations(load_matches(), bot_app)
 
 
 def check_favorite_goal_notifications():
