@@ -358,6 +358,10 @@ const translations = {
     bracket: "نمودار بازی‌ها",
     bracketTitle: "مسیر قهرمانی",
     bracketSubtitle: "مسیر مرحله حذفی جام جهانی؛ از یک‌شانزدهم نهایی تا فینال",
+    bracketSwipeHint: "برای دیدن کامل نمودار، به چپ و راست بکشید",
+    zoomIn: "بزرگ‌نمایی",
+    zoomOut: "کوچک‌نمایی",
+    resetZoom: "بازنشانی",
     roundOf32: "یک‌شانزدهم نهایی",
     roundOf16: "یک‌هشتم نهایی",
     quarterfinals: "یک‌چهارم نهایی",
@@ -440,6 +444,10 @@ const translations = {
     bracket: "Bracket",
     bracketTitle: "Road to the Trophy",
     bracketSubtitle: "The World Cup knockout path, from the round of 32 to the final.",
+    bracketSwipeHint: "Swipe horizontally to view the full bracket",
+    zoomIn: "Zoom in",
+    zoomOut: "Zoom out",
+    resetZoom: "Reset",
     roundOf32: "Round of 32",
     roundOf16: "Round of 16",
     quarterfinals: "Quarterfinals",
@@ -920,6 +928,7 @@ function BracketColumn({ ids, matchesById, round, title, side, lang, t }) {
 }
 
 function KnockoutBracket({ matches, lang, t }) {
+  const [zoom, setZoom] = useState(1);
   const matchesById = useMemo(
     () => new Map(
       matches
@@ -928,31 +937,53 @@ function KnockoutBracket({ matches, lang, t }) {
     ),
     [matches],
   );
+  const updateZoom = (change) => {
+    setZoom((current) => Math.min(1.25, Math.max(0.75, Number((current + change).toFixed(2)))));
+  };
+  const stageStyle = {
+    "--bracket-zoom": zoom,
+    width: `${1668 * zoom}px`,
+    height: `${1090 * zoom}px`,
+  };
 
   return (
-    <div className="bracket-scroll" dir="ltr">
-      <div className="bracket-board">
-        <BracketColumn ids={[73, 75, 74, 77, 76, 78, 79, 80]} matchesById={matchesById} round="r32" title={t.roundOf32} side="left" lang={lang} t={t} />
-        <BracketColumn ids={[90, 89, 91, 92]} matchesById={matchesById} round="r16" title={t.roundOf16} side="left" lang={lang} t={t} />
-        <BracketColumn ids={[97, 99]} matchesById={matchesById} round="qf" title={t.quarterfinals} side="left" lang={lang} t={t} />
-        <BracketColumn ids={[101]} matchesById={matchesById} round="sf" title={t.semifinals} side="left" lang={lang} t={t} />
+    <div className="bracket-scroll-shell">
+      <div className="bracket-tools" dir={t.dir}>
+        <p>{t.bracketSwipeHint}</p>
+        <div className="bracket-zoom-controls" aria-label={t.bracketTitle}>
+          <button type="button" title={t.zoomOut} aria-label={t.zoomOut} onClick={() => updateZoom(-0.1)} disabled={zoom <= 0.75}>−</button>
+          <span aria-live="polite">{Math.round(zoom * 100)}%</span>
+          <button type="button" title={t.zoomIn} aria-label={t.zoomIn} onClick={() => updateZoom(0.1)} disabled={zoom >= 1.25}>+</button>
+          <button type="button" className="bracket-reset-btn" onClick={() => setZoom(1)} disabled={zoom === 1}>{t.resetZoom}</button>
+        </div>
+      </div>
 
-        <section className="bracket-center" dir={t.dir}>
-          <div className="bracket-center-match final-match">
-            <h3>{t.final}</h3>
-            <BracketMatchCard match={matchesById.get(104)} lang={lang} t={t} />
-          </div>
-          <div className="bracket-trophy" aria-hidden="true"><span>MP</span></div>
-          <div className="bracket-center-match third-match">
-            <h3>{t.thirdPlace}</h3>
-            <BracketMatchCard match={matchesById.get(103)} lang={lang} t={t} />
-          </div>
-        </section>
+      <div className="bracket-scroll bracket-scroll-area" dir="ltr">
+        <div className="bracket-stage" style={stageStyle}>
+          <div className="bracket-board">
+            <BracketColumn ids={[73, 75, 74, 77, 76, 78, 79, 80]} matchesById={matchesById} round="r32" title={t.roundOf32} side="left" lang={lang} t={t} />
+            <BracketColumn ids={[90, 89, 91, 92]} matchesById={matchesById} round="r16" title={t.roundOf16} side="left" lang={lang} t={t} />
+            <BracketColumn ids={[97, 99]} matchesById={matchesById} round="qf" title={t.quarterfinals} side="left" lang={lang} t={t} />
+            <BracketColumn ids={[101]} matchesById={matchesById} round="sf" title={t.semifinals} side="left" lang={lang} t={t} />
 
-        <BracketColumn ids={[102]} matchesById={matchesById} round="sf" title={t.semifinals} side="right" lang={lang} t={t} />
-        <BracketColumn ids={[98, 100]} matchesById={matchesById} round="qf" title={t.quarterfinals} side="right" lang={lang} t={t} />
-        <BracketColumn ids={[93, 94, 95, 96]} matchesById={matchesById} round="r16" title={t.roundOf16} side="right" lang={lang} t={t} />
-        <BracketColumn ids={[83, 84, 81, 82, 86, 88, 85, 87]} matchesById={matchesById} round="r32" title={t.roundOf32} side="right" lang={lang} t={t} />
+            <section className="bracket-center" dir={t.dir}>
+              <div className="bracket-center-match final-match">
+                <h3>{t.final}</h3>
+                <BracketMatchCard match={matchesById.get(104)} lang={lang} t={t} />
+              </div>
+              <div className="bracket-trophy" aria-hidden="true"><span>MP</span></div>
+              <div className="bracket-center-match third-match">
+                <h3>{t.thirdPlace}</h3>
+                <BracketMatchCard match={matchesById.get(103)} lang={lang} t={t} />
+              </div>
+            </section>
+
+            <BracketColumn ids={[102]} matchesById={matchesById} round="sf" title={t.semifinals} side="right" lang={lang} t={t} />
+            <BracketColumn ids={[98, 100]} matchesById={matchesById} round="qf" title={t.quarterfinals} side="right" lang={lang} t={t} />
+            <BracketColumn ids={[93, 94, 95, 96]} matchesById={matchesById} round="r16" title={t.roundOf16} side="right" lang={lang} t={t} />
+            <BracketColumn ids={[83, 84, 81, 82, 86, 88, 85, 87]} matchesById={matchesById} round="r32" title={t.roundOf32} side="right" lang={lang} t={t} />
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1128,13 +1159,20 @@ function App() {
   }, [pastOnlyMatches]);
 
   useEffect(() => {
-    const tg = window.Telegram?.WebApp;
-    const scoreTimeouts = scoreChangeTimeouts.current;
+    const telegramWebApp = window.Telegram?.WebApp;
+    if (!telegramWebApp) return;
 
-    if (tg) {
-      tg.ready();
-      tg.expand();
+    try {
+      telegramWebApp.ready?.();
+      telegramWebApp.expand?.();
+      telegramWebApp.disableVerticalSwipes?.();
+    } catch (error) {
+      console.warn("Telegram WebApp initialization was not fully available:", error);
     }
+  }, []);
+
+  useEffect(() => {
+    const scoreTimeouts = scoreChangeTimeouts.current;
 
     const markScoreChanged = (matchId) => {
       setScoreChangedMatchIds((currentIds) => new Set(currentIds).add(matchId));
