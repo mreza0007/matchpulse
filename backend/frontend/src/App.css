@@ -750,7 +750,21 @@ h1 {
   margin-top: 8px;
 }
 
+.match-score-block {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  overflow: visible;
+}
+
 .penalty-summary {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  visibility: visible;
+  opacity: 1;
   margin: 10px 0 2px;
   padding: 9px 11px;
   border: 1px solid rgba(var(--theme-accent-rgb), 0.24);

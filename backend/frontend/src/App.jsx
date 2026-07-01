@@ -684,6 +684,33 @@ function getPenaltySummary(match, lang) {
   return `${winnerName} در ضربات پنالتی${scoreText} پیروز شد`;
 }
 
+function normalizeMatchPayload(match) {
+  const shootout = match?.penalty_shootout || match?.penalty || {};
+
+  return {
+    ...match,
+    home_penalty_score: match?.home_penalty_score ?? shootout.home_penalty_score ?? shootout.home_score,
+    away_penalty_score: match?.away_penalty_score ?? shootout.away_penalty_score ?? shootout.away_score,
+    penalty_winner_side: match?.penalty_winner_side ?? shootout.winner_side,
+    penalty_winner_fa: match?.penalty_winner_fa ?? shootout.winner_fa,
+    penalty_winner_en: match?.penalty_winner_en ?? shootout.winner_en,
+    penalty_summary_fa: match?.penalty_summary_fa ?? shootout.summary_fa,
+    penalty_summary_en: match?.penalty_summary_en ?? shootout.summary_en,
+    win_method: match?.win_method ?? shootout.win_method,
+  };
+}
+
+function PenaltySummary({ match, lang, compact = false }) {
+  const summary = getPenaltySummary(match, lang);
+  if (!summary) return null;
+
+  return (
+    <div className={compact ? "bracket-penalty-summary" : "penalty-summary"}>
+      {summary}
+    </div>
+  );
+}
+
 function MatchCard({
   match,
   t,
@@ -714,7 +741,6 @@ function MatchCard({
   const awayName = getLocalizedTeamName(match, "away", lang);
   const shouldShowScoreFallback = !matchScore && ["finished", "pending_result"].includes(matchStatus.key);
   const matchDateTime = formatTehranMatchDateTime(match, lang);
-  const penaltySummary = getPenaltySummary(match, lang);
   const canViewEvents = canShowEvents(match);
   const stopCardClick = (event) => event.stopPropagation();
   const renderTeamName = (name, flag, englishName, team) => {
@@ -755,23 +781,24 @@ function MatchCard({
         {isLive && <span className="match-status live live-pulse">{matchStatus.label}</span>}
       </div>
 
-      <div className="teams">
-        {renderTeamName(homeName, match.home_flag, match.home_en, homeTeam)}
-        <span
-          className={
-            matchScore
-              ? `match-score ${isScoreChanged ? "score-changed" : ""}`
-              : shouldShowScoreFallback
-                ? "match-score-pending"
-                : "match-vs"
-          }
-        >
-          {matchScore || (shouldShowScoreFallback ? t.scorePending : t.vs)}
-        </span>
-        {renderTeamName(awayName, match.away_flag, match.away_en, awayTeam)}
+      <div className="match-score-block">
+        <div className="teams">
+          {renderTeamName(homeName, match.home_flag, match.home_en, homeTeam)}
+          <span
+            className={
+              matchScore
+                ? `match-score ${isScoreChanged ? "score-changed" : ""}`
+                : shouldShowScoreFallback
+                  ? "match-score-pending"
+                  : "match-vs"
+            }
+          >
+            {matchScore || (shouldShowScoreFallback ? t.scorePending : t.vs)}
+          </span>
+          {renderTeamName(awayName, match.away_flag, match.away_en, awayTeam)}
+        </div>
+        <PenaltySummary match={match} lang={lang} />
       </div>
-
-      {penaltySummary && <p className="penalty-summary">{penaltySummary}</p>}
 
       <div className="match-meta-grid">
         <span>🕒 {matchDateTime.time}</span>
@@ -869,7 +896,7 @@ function BracketMatchCard({ match, lang, t }) {
         <b>{showScore ? getScoreValue(match, ["away_score", "awayScore"]) ?? "—" : ""}</b>
       </div>
 
-      {penaltySummary && <p className="bracket-penalty-summary">{penaltySummary}</p>}
+      <PenaltySummary match={match} lang={lang} compact />
 
       {showScore && score && <span className="bracket-score-summary">{score}</span>}
       <span className="bracket-match-number">#{match.id}</span>
@@ -1177,7 +1204,10 @@ function App() {
         })
         .then((data) => {
           setCurrentTime(Date.now());
-          updateMatches(Array.isArray(data.matches) ? data.matches : []);
+          const normalizedMatches = Array.isArray(data.matches)
+            ? data.matches.map(normalizeMatchPayload)
+            : [];
+          updateMatches(normalizedMatches);
           setMatchesError("");
         })
         .catch((error) => {
