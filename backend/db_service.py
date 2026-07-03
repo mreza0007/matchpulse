@@ -210,17 +210,56 @@ def delete_prediction(telegram_id, match_id):
     return deleted
 
 
+def canonical_prediction_result(match):
+    if not isinstance(match, dict):
+        return None
+
+    status = str(match.get("status") or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if match.get("is_finished") is not True and status not in {
+        "finished", "finish", "ft", "full_time", "fulltime", "completed", "complete", "final",
+    }:
+        return None
+
+    result = str(match.get("result") or "").strip().lower()
+    if result in ALLOWED_PREDICTIONS:
+        return result
+
+    penalty_winner = str(match.get("penalty_winner_side") or "").strip().lower()
+    if penalty_winner in {"home", "away"}:
+        return penalty_winner
+
+    score = match.get("score") if isinstance(match.get("score"), dict) else {}
+    home_score = match.get("home_score")
+    away_score = match.get("away_score")
+    if home_score is None:
+        home_score = score.get("home")
+    if away_score is None:
+        away_score = score.get("away")
+
+    try:
+        home_score = int(home_score)
+        away_score = int(away_score)
+    except (TypeError, ValueError):
+        return None
+
+    if home_score > away_score:
+        return "home"
+    if away_score > home_score:
+        return "away"
+    return "draw"
+
+
 def get_prediction_stats(telegram_id, matches):
     predictions = get_user_predictions(telegram_id)
-    matches_by_id = {match.get("id"): match for match in matches}
+    matches_by_id = {str(match.get("id")): match for match in matches}
     correct = 0
     wrong = 0
     pending = 0
 
     for prediction in predictions:
-        match = matches_by_id.get(prediction["match_id"])
-        result = str((match or {}).get("result") or "").strip().lower()
-        if result not in ALLOWED_PREDICTIONS:
+        match = matches_by_id.get(str(prediction["match_id"]))
+        result = canonical_prediction_result(match)
+        if result is None:
             pending += 1
         elif prediction["prediction"] == result:
             correct += 1

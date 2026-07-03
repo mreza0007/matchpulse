@@ -916,7 +916,7 @@ def normalize_status(status):
     if normalized in {
         "live", "in_progress", "ongoing", "1h", "2h", "ht", "half_time",
         "halftime", "break", "et", "extra_time_break", "penalties",
-        "penalty_shootout", "shootout",
+        "penalty_shootout", "shootout", "intermission", "pause", "extra_time_halftime",
     }:
         return "live"
 
@@ -974,6 +974,9 @@ ACTIVE_BREAK_STATUSES = {
     "penalties",
     "penalty_shootout",
     "shootout",
+    "intermission",
+    "pause",
+    "extra_time_halftime",
 }
 
 ACTIVE_BREAK_MARKERS = (
@@ -982,11 +985,11 @@ ACTIVE_BREAK_MARKERS = (
     "halftime",
     "extra time break",
     "penalty shootout",
-    "پایان نیمه اول",
-    "بین دو نیمه",
-    "استراحت بین دو نیمه",
-    "استراحت وقت اضافه",
-    "ضربات پنالتی",
+    "\u067e\u0627\u06cc\u0627\u0646 \u0646\u06cc\u0645\u0647 \u0627\u0648\u0644",
+    "\u0628\u06cc\u0646 \u062f\u0648 \u0646\u06cc\u0645\u0647",
+    "\u0627\u0633\u062a\u0631\u0627\u062d\u062a \u0628\u06cc\u0646 \u062f\u0648 \u0646\u06cc\u0645\u0647",
+    "\u0627\u0633\u062a\u0631\u0627\u062d\u062a \u0648\u0642\u062a \u0627\u0636\u0627\u0641\u0647",
+    "\u0636\u0631\u0628\u0627\u062a \u067e\u0646\u0627\u0644\u062a\u06cc",
 )
 
 
@@ -1000,6 +1003,8 @@ def match_active_break_label(match):
         match.get("time_elapsed"),
         match.get("match_status"),
         match.get("live_badge"),
+        match.get("raw_live_badge"),
+        raw_provider_status.get("status"),
         raw_provider_status.get("statusTitle"),
         raw_provider_status.get("status_title"),
     )
@@ -1009,13 +1014,13 @@ def match_active_break_label(match):
     if normalized_values.intersection(ACTIVE_BREAK_STATUSES) or any(
         marker in combined_text for marker in ACTIVE_BREAK_MARKERS
     ):
-        if "پایان نیمه اول" in combined_text or "بین دو نیمه" in combined_text:
+        if "\u067e\u0627\u06cc\u0627\u0646 \u0646\u06cc\u0645\u0647 \u0627\u0648\u0644" in combined_text or "\u0628\u06cc\u0646 \u062f\u0648 \u0646\u06cc\u0645\u0647" in combined_text:
             return "HT"
         if "half" in combined_text or "ht" in normalized_values:
             return "HT"
-        if "penalt" in combined_text or "پنالتی" in combined_text:
-            return "ضربات پنالتی"
-        return "بین دو نیمه"
+        if "penalt" in combined_text or "\u067e\u0646\u0627\u0644\u062a\u06cc" in combined_text:
+            return "\u0636\u0631\u0628\u0627\u062a \u067e\u0646\u0627\u0644\u062a\u06cc"
+        return "\u0628\u06cc\u0646 \u062f\u0648 \u0646\u06cc\u0645\u0647"
 
     return ""
 
@@ -1151,6 +1156,7 @@ def normalize_match_status(match):
         match.get("statusTitle"),
         match.get("raw_status"),
         match.get("live_badge"),
+        match.get("raw_live_badge"),
         raw_status_title,
     ]
     normalized_candidates = {
@@ -1177,6 +1183,7 @@ def normalize_match_status(match):
         "live", "in_progress", "ongoing", "1h", "2h", "ht", "half_time",
         "halftime", "break", "et", "extra_time_break", "penalties",
         "penalty_shootout", "shootout", "first_half", "second_half",
+        "intermission", "pause", "extra_time_halftime",
     }
     cancelled_statuses = {
         "cancelled",

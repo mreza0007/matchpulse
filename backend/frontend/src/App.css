@@ -350,15 +350,6 @@ h1 {
   color: var(--theme-live);
 }
 
-.smart-hero-live-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--theme-live);
-  box-shadow: 0 0 0 5px rgba(var(--theme-live-rgb), 0.12);
-  animation: livePulse 1.5s ease-out infinite;
-}
-
 .smart-hero-card .hero-match-card {
   padding: 19px 17px;
   border-color: rgba(var(--theme-accent-rgb), 0.22);
@@ -399,7 +390,7 @@ h1 {
 }
 
 .hero-match-card .match-status.live {
-  padding: 7px 13px 7px 27px;
+  padding: 7px 13px;
   border-color: rgba(var(--theme-live-rgb), 0.56);
   background: rgba(var(--theme-live-rgb), 0.16);
   font-size: 12px;
@@ -2381,6 +2372,11 @@ h1 {
   background: rgba(var(--theme-live-rgb), 0.13);
   color: #ffb4b4;
   box-shadow: none;
+}
+
+.hero-match-card .live-pulse::before,
+.hero-match-card .live-pulse::after {
+  display: none;
 }
 
 .quick-actions {

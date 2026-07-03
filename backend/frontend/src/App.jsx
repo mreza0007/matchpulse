@@ -147,24 +147,30 @@ function normalizeMatchStatus(match) {
     match?.time_elapsed,
     match?.live_badge,
     match?.raw_live_badge,
+    match?.match_status,
+    match?.raw_provider_status?.status,
     match?.raw_provider_status?.statusTitle,
+    match?.raw_provider_status?.status_title,
   ].filter(Boolean).join(" ").toLowerCase();
   const activeBreak = [
     "half time",
     "half-time",
     "halftime",
+    "intermission",
+    "break",
     "extra time break",
     "penalty shootout",
-    "پایان نیمه اول",
-    "بین دو نیمه",
-    "استراحت بین دو نیمه",
-    "استراحت وقت اضافه",
-    "ضربات پنالتی",
+    "\u067e\u0627\u06cc\u0627\u0646 \u0646\u06cc\u0645\u0647 \u0627\u0648\u0644",
+    "\u0628\u06cc\u0646 \u062f\u0648 \u0646\u06cc\u0645\u0647",
+    "\u0627\u0633\u062a\u0631\u0627\u062d\u062a \u0628\u06cc\u0646 \u062f\u0648 \u0646\u06cc\u0645\u0647",
+    "\u0627\u0633\u062a\u0631\u0627\u062d\u062a \u0648\u0642\u062a \u0627\u0636\u0627\u0641\u0647",
+    "\u0636\u0631\u0628\u0627\u062a \u067e\u0646\u0627\u0644\u062a\u06cc",
   ].some((marker) => statusText.includes(marker));
 
   if (match?.is_live || [
     "live", "in_progress", "ht", "half_time", "halftime", "break", "et",
     "extra_time_break", "penalties", "penalty_shootout", "shootout",
+    "intermission", "pause", "extra_time_halftime",
   ].includes(status) || activeBreak) return "live";
   if (match?.is_finished || status === "finished") return "finished";
   if (status === "pending_result") return "pending_result";
@@ -1063,7 +1069,6 @@ function HeroMatchCard({ label, mode, match, lang, t, children }) {
     <section className={`smart-hero-card ${mode}`} aria-label={label}>
       <div className="smart-hero-heading">
         <span className="smart-hero-kicker">{label}</span>
-        {mode === "live" && <span className="smart-hero-live-dot" aria-hidden="true" />}
       </div>
       <div className={`smart-hero-status ${statusLine.isCountdown ? "countdown" : ""}`}>
         {statusLine.label && <span>{statusLine.label}</span>}
@@ -1250,6 +1255,7 @@ function App() {
   const [loadingEventsId, setLoadingEventsId] = useState(null);
   const [scoreChangedMatchIds, setScoreChangedMatchIds] = useState(() => new Set());
   const scoreChangeTimeouts = useRef(new Map());
+  const predictionMutationVersion = useRef(0);
 
   const t = translations[lang];
   const telegramId = telegramUser?.id;
@@ -1269,6 +1275,19 @@ function App() {
   const reminderIds = useMemo(
     () => new Set(reminders.map((match) => match.id)),
     [reminders],
+  );
+
+  const predictionResultsVersion = useMemo(
+    () => JSON.stringify(matches.map((match) => [
+      match.id,
+      match.status,
+      match.is_finished,
+      match.result,
+      match.home_score,
+      match.away_score,
+      match.penalty_winner_side,
+    ])),
+    [matches],
   );
 
   const teamsByName = useMemo(() => {
@@ -1525,12 +1544,14 @@ function App() {
       .then((data) => setReminders(Array.isArray(data.reminders) ? data.reminders : []))
       .catch((error) => console.error("Failed to load reminders:", error));
 
+    const predictionFetchVersion = predictionMutationVersion.current;
     fetch(`${API_BASE_URL}/predictions/${telegramId}`)
       .then((response) => {
         if (!response.ok) throw new Error(`Predictions request failed: ${response.status}`);
         return response.json();
       })
       .then((data) => {
+        if (predictionMutationVersion.current !== predictionFetchVersion) return;
         const predictions = Array.isArray(data.predictions) ? data.predictions : [];
         setPredictionsByMatch(Object.fromEntries(
           predictions.map((prediction) => [String(prediction.match_id), prediction.prediction]),
@@ -1552,6 +1573,24 @@ function App() {
       }))
       .catch((error) => console.error("Failed to load prediction stats:", error));
   }, [telegramId, telegramUser]);
+
+  useEffect(() => {
+    if (!telegramId || !predictionResultsVersion) return;
+
+    fetch(`${API_BASE_URL}/prediction-stats/${telegramId}`)
+      .then((response) => {
+        if (!response.ok) throw new Error(`Prediction stats refresh failed: ${response.status}`);
+        return response.json();
+      })
+      .then((data) => setPredictionStats({
+        points: Number(data.points) || 0,
+        correct: Number(data.correct) || 0,
+        wrong: Number(data.wrong) || 0,
+        pending: Number(data.pending) || 0,
+        total: Number(data.total) || 0,
+      }))
+      .catch((error) => console.error("Failed to refresh prediction stats:", error));
+  }, [predictionResultsVersion, telegramId]);
 
   const toggleLang = () => {
     setLang((current) => (current === "fa" ? "en" : "fa"));
@@ -1700,6 +1739,11 @@ function App() {
       return;
     }
 
+    const matchKey = String(matchId);
+    const previousPrediction = predictionsByMatch[matchKey] || "";
+    let predictionSaved = false;
+    predictionMutationVersion.current += 1;
+    setPredictionsByMatch((current) => ({ ...current, [matchKey]: prediction }));
     setSavingPredictionMatchId(matchId);
     setPredictionSavedMatchId(null);
     fetch(`${API_BASE_URL}/prediction`, {
@@ -1718,10 +1762,14 @@ function App() {
         return data;
       })
       .then((data) => {
+        predictionSaved = true;
         const predictions = Array.isArray(data.predictions) ? data.predictions : [];
-        setPredictionsByMatch(Object.fromEntries(
-          predictions.map((item) => [String(item.match_id), item.prediction]),
-        ));
+        setPredictionsByMatch((current) => ({
+          ...current,
+          ...Object.fromEntries(
+            predictions.map((item) => [String(item.match_id), item.prediction]),
+          ),
+        }));
         setPredictionSavedMatchId(matchId);
         return fetch(`${API_BASE_URL}/prediction-stats/${telegramId}`);
       })
@@ -1736,7 +1784,17 @@ function App() {
         pending: Number(data.pending) || 0,
         total: Number(data.total) || 0,
       }))
-      .catch((error) => console.error("Failed to save prediction:", error))
+      .catch((error) => {
+        if (!predictionSaved) {
+          setPredictionsByMatch((current) => {
+            const next = { ...current };
+            if (previousPrediction) next[matchKey] = previousPrediction;
+            else delete next[matchKey];
+            return next;
+          });
+        }
+        console.error("Failed to save prediction:", error);
+      })
       .finally(() => setSavingPredictionMatchId(null));
   };
 

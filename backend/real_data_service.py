@@ -96,14 +96,15 @@ def get_real_matches(status="all"):
         if override:
             item = apply_score_override(item, override)
 
-        if item.get("needs_score_sync") and not override:
+        status_info = normalize_match_status(item)
+
+        if item.get("needs_score_sync") and not override and not status_info["is_live"]:
             item["status"] = "pending_result"
             item["is_finished"] = False
             item["is_live"] = False
             item["is_upcoming"] = False
             item["live_badge"] = False
         else:
-            status_info = normalize_match_status(item)
             item["status"] = normalized_status(status_info["status"])
             item["is_finished"] = status_info["is_finished"]
             item["is_live"] = status_info["is_live"]

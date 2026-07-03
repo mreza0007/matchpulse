@@ -190,15 +190,21 @@ def raw_provider_status(match):
 
 def provider_status_values(match):
     raw_status = raw_provider_status(match)
-    values = {
+    raw_values = {
         normalized_status(match),
         str(match.get("status_title") or "").strip().lower(),
+        str(match.get("statusTitle") or "").strip().lower(),
+        str(match.get("time_elapsed") or "").strip().lower(),
+        str(match.get("match_status") or "").strip().lower(),
+        str(match.get("live_badge") or "").strip().lower(),
+        str(match.get("raw_live_badge") or "").strip().lower(),
         str(raw_status.get("status") or "").strip().lower(),
         str(raw_status.get("statusTitle") or "").strip().lower(),
         str(raw_status.get("status_title") or "").strip().lower(),
     }
-
-    return {value for value in values if value}
+    values = {value for value in raw_values if value}
+    values.update(value.replace("-", "_").replace(" ", "_") for value in tuple(values))
+    return values
 
 
 def provider_status_known(match):
@@ -221,6 +227,9 @@ def provider_status_is_live(match):
         "penalties",
         "penalty_shootout",
         "shootout",
+        "intermission",
+        "pause",
+        "extra_time_halftime",
         "first_half",
         "second_half",
     }
@@ -294,6 +303,9 @@ def is_active_or_transitional(match):
         "penalty",
         "penalty_shootout",
         "shootout",
+        "intermission",
+        "pause",
+        "extra_time_halftime",
         "pending_result",
         "scheduled",
         "upcoming",
@@ -565,6 +577,9 @@ def is_live_match(match):
         "penalties",
         "penalty_shootout",
         "shootout",
+        "intermission",
+        "pause",
+        "extra_time_halftime",
     }
 
 
