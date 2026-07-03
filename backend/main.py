@@ -1,7 +1,8 @@
 import os
 import asyncio
+import time
 from dotenv import load_dotenv
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -22,6 +23,9 @@ from db_service import (
     get_reminders_from_db,
     get_all_reminders_from_db,
     delete_reminder_from_db,
+    save_prediction,
+    get_user_predictions,
+    get_prediction_stats,
 )
 
 from telegram import (
@@ -77,6 +81,12 @@ class FavoriteTeamData(BaseModel):
 class ReminderData(BaseModel):
     telegram_id: int
     match_id: int
+
+
+class PredictionData(BaseModel):
+    telegram_id: int
+    match_id: int
+    prediction: str
 
 
 def load_memory_from_db():
@@ -271,6 +281,61 @@ def delete_reminder(data: ReminderData):
         "telegram_id": data.telegram_id,
         "reminders": reminders[data.telegram_id],
     }
+
+
+def prediction_match(match_id):
+    return next(
+        (match for match in get_real_matches(status="all") if match.get("id") == match_id),
+        None,
+    )
+
+
+def prediction_is_locked(match):
+    if not match:
+        return True
+    if match.get("is_live") is True or match.get("is_finished") is True:
+        return True
+    if match.get("is_upcoming") is not True or str(match.get("status") or "").lower() != "upcoming":
+        return True
+    try:
+        kickoff_ts = float(match.get("kickoff_ts") or match.get("kickoff_timestamp"))
+    except (TypeError, ValueError):
+        return True
+    return kickoff_ts <= time.time()
+
+
+@api.post("/prediction")
+def create_or_update_prediction(data: PredictionData):
+    prediction = data.prediction.strip().lower()
+    if data.telegram_id <= 0 or data.match_id <= 0:
+        raise HTTPException(status_code=400, detail="Invalid telegram_id or match_id")
+    if prediction not in {"home", "draw", "away"}:
+        raise HTTPException(status_code=400, detail="Invalid prediction")
+
+    match = prediction_match(data.match_id)
+    if match is None:
+        raise HTTPException(status_code=404, detail="Match not found")
+    if prediction_is_locked(match):
+        raise HTTPException(status_code=409, detail="Prediction is locked")
+
+    save_prediction(data.telegram_id, data.match_id, prediction)
+    predictions = get_user_predictions(data.telegram_id)
+    return {"success": True, "count": len(predictions), "predictions": predictions}
+
+
+@api.get("/predictions/{telegram_id}")
+def get_predictions(telegram_id: int):
+    if telegram_id <= 0:
+        raise HTTPException(status_code=400, detail="Invalid telegram_id")
+    predictions = get_user_predictions(telegram_id)
+    return {"count": len(predictions), "predictions": predictions}
+
+
+@api.get("/prediction-stats/{telegram_id}")
+def prediction_stats(telegram_id: int):
+    if telegram_id <= 0:
+        raise HTTPException(status_code=400, detail="Invalid telegram_id")
+    return get_prediction_stats(telegram_id, get_real_matches(status="all"))
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):

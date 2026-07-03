@@ -72,6 +72,20 @@ def init_db():
 
     cursor.execute(
         """
+        CREATE TABLE IF NOT EXISTS predictions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id INTEGER NOT NULL,
+            match_id INTEGER NOT NULL,
+            prediction TEXT NOT NULL CHECK(prediction IN ('home', 'draw', 'away')),
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(telegram_id, match_id)
+        )
+        """
+    )
+
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS sent_notifications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             notification_key TEXT UNIQUE,
@@ -105,6 +119,121 @@ def normalize_team_key(value):
         .replace("-", "")
         .replace("_", "")
     )
+
+
+ALLOWED_PREDICTIONS = {"home", "draw", "away"}
+
+
+def save_prediction(telegram_id, match_id, prediction):
+    if prediction not in ALLOWED_PREDICTIONS:
+        raise ValueError("Invalid prediction")
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO predictions (telegram_id, match_id, prediction)
+        VALUES (?, ?, ?)
+        ON CONFLICT(telegram_id, match_id) DO UPDATE SET
+            prediction = excluded.prediction,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (telegram_id, match_id, prediction),
+    )
+    conn.commit()
+    conn.close()
+    return get_prediction(telegram_id, match_id)
+
+
+def get_user_predictions(telegram_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT id, telegram_id, match_id, prediction, created_at, updated_at
+        FROM predictions
+        WHERE telegram_id = ?
+        ORDER BY updated_at DESC, id DESC
+        """,
+        (telegram_id,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {
+            "id": row[0],
+            "telegram_id": row[1],
+            "match_id": row[2],
+            "prediction": row[3],
+            "created_at": row[4],
+            "updated_at": row[5],
+        }
+        for row in rows
+    ]
+
+
+def get_prediction(telegram_id, match_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT id, telegram_id, match_id, prediction, created_at, updated_at
+        FROM predictions
+        WHERE telegram_id = ? AND match_id = ?
+        """,
+        (telegram_id, match_id),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if row is None:
+        return None
+    return {
+        "id": row[0],
+        "telegram_id": row[1],
+        "match_id": row[2],
+        "prediction": row[3],
+        "created_at": row[4],
+        "updated_at": row[5],
+    }
+
+
+def delete_prediction(telegram_id, match_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "DELETE FROM predictions WHERE telegram_id = ? AND match_id = ?",
+        (telegram_id, match_id),
+    )
+    conn.commit()
+    deleted = cursor.rowcount > 0
+    conn.close()
+    return deleted
+
+
+def get_prediction_stats(telegram_id, matches):
+    predictions = get_user_predictions(telegram_id)
+    matches_by_id = {match.get("id"): match for match in matches}
+    correct = 0
+    wrong = 0
+    pending = 0
+
+    for prediction in predictions:
+        match = matches_by_id.get(prediction["match_id"])
+        result = str((match or {}).get("result") or "").strip().lower()
+        if result not in ALLOWED_PREDICTIONS:
+            pending += 1
+        elif prediction["prediction"] == result:
+            correct += 1
+        else:
+            wrong += 1
+
+    return {
+        "points": correct * 3,
+        "correct": correct,
+        "wrong": wrong,
+        "pending": pending,
+        "total": len(predictions),
+    }
 
 
 def team_key_from_data(team):

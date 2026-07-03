@@ -206,6 +206,19 @@ function isFutureMatchStatus(match) {
   return ["scheduled", "upcoming", "notstarted", "not_started"].includes(status);
 }
 
+function isPredictionLocked(match) {
+  if (isLiveMatch(match) || isFinishedMatch(match) || isPendingResultMatch(match)) return true;
+  if (!isFutureMatchStatus(match)) return true;
+  const kickoffTime = getKickoffTime(match);
+  return !Number.isFinite(kickoffTime) || kickoffTime <= Date.now();
+}
+
+function getPredictionLabel(match, prediction, lang, t) {
+  if (prediction === "draw") return t.predictionDraw;
+  const side = prediction === "home" ? "home" : "away";
+  return t.predictionWin.replace("{team}", getLocalizedTeamName(match, side, lang));
+}
+
 function parseKickoffDate(match) {
   const kickoffValue = match?.kickoff_iso || match?.kickoff_utc || match?.kickoff;
 
@@ -425,6 +438,15 @@ const translations = {
     removedFavorite: "از تیم‌های محبوب حذف شد",
     addedReminder: "یادآور مسابقه ذخیره شد",
     removedReminder: "یادآور مسابقه حذف شد",
+    prediction: "پیش‌بینی",
+    predictionWin: "برد {team}",
+    predictionDraw: "مساوی",
+    predictionSaved: "پیش‌بینی ثبت شد",
+    predictionLocked: "پیش‌بینی قفل شد",
+    predictionPoints: "امتیاز پیش‌بینی",
+    predictionCorrect: "درست",
+    predictionWrong: "نادرست",
+    predictionPending: "در انتظار",
     activeReminders: "یادآورهای فعال",
     profileTitle: "پروفایل من",
     profileText: "اطلاعات تلگرام، تیم‌های محبوب و یادآورهای فعال تو اینجا نمایش داده می‌شود.",
@@ -521,6 +543,15 @@ const translations = {
     removedFavorite: "Removed from favorite teams",
     addedReminder: "Match reminder saved",
     removedReminder: "Match reminder removed",
+    prediction: "Prediction",
+    predictionWin: "{team} win",
+    predictionDraw: "Draw",
+    predictionSaved: "Prediction saved",
+    predictionLocked: "Prediction locked",
+    predictionPoints: "Prediction points",
+    predictionCorrect: "Correct",
+    predictionWrong: "Wrong",
+    predictionPending: "Pending",
     activeReminders: "Active Reminders",
     profileTitle: "My Profile",
     profileText: "Your Telegram info, favorite teams, and active match reminders live here.",
@@ -849,6 +880,11 @@ function MatchCard({
   eventsFailed = false,
   isScoreChanged = false,
   variant = "standard",
+  prediction = "",
+  onPredictionSelect,
+  isPredictionSaving = false,
+  predictionWasSaved = false,
+  predictionForceLocked = false,
 }) {
   const matchStatus = getMatchStatus(match, t);
   const isLive = isLiveMatch(match);
@@ -862,6 +898,8 @@ function MatchCard({
   const shouldShowScoreFallback = !matchScore && ["finished", "pending_result"].includes(matchStatus.key);
   const matchDateTime = formatTehranMatchDateTime(match, lang);
   const canViewEvents = canShowEvents(match);
+  const predictionLocked = predictionForceLocked || isPredictionLocked(match);
+  const showPrediction = isFutureMatchStatus(match) || Boolean(prediction);
   const stopCardClick = (event) => event.stopPropagation();
   const renderTeamName = (name, flag, englishName, team) => {
     const isFavorite = team
@@ -934,6 +972,29 @@ function MatchCard({
       {match.result && match.score_source !== "football-data.org" && (
         <div className="match-info">
           <span>📊 {match.result}</span>
+        </div>
+      )}
+
+      {showPrediction && (
+        <div className={`prediction-panel ${predictionLocked ? "locked" : ""}`}>
+          <div className="prediction-heading">
+            <strong>{t.prediction}</strong>
+            {predictionLocked && <span>{t.predictionLocked}</span>}
+            {!predictionLocked && predictionWasSaved && <span>{t.predictionSaved}</span>}
+          </div>
+          <div className="prediction-options">
+            {["home", "draw", "away"].map((value) => (
+              <button
+                className={prediction === value ? "selected" : ""}
+                disabled={predictionLocked || isPredictionSaving}
+                key={value}
+                onClick={() => onPredictionSelect?.(match.id, value)}
+                type="button"
+              >
+                {getPredictionLabel(match, value, lang, t)}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -1177,6 +1238,11 @@ function App() {
   const [favoriteMessage, setFavoriteMessage] = useState("");
   const [reminders, setReminders] = useState([]);
   const [reminderMessage, setReminderMessage] = useState("");
+  const [predictionsByMatch, setPredictionsByMatch] = useState({});
+  const [predictionStats, setPredictionStats] = useState({ points: 0, correct: 0, wrong: 0, pending: 0, total: 0 });
+  const [savingPredictionMatchId, setSavingPredictionMatchId] = useState(null);
+  const [predictionSavedMatchId, setPredictionSavedMatchId] = useState(null);
+  const [predictionLockedMatchIds, setPredictionLockedMatchIds] = useState(() => new Set());
   const [selectedMatchId, setSelectedMatchId] = useState(null);
   const [matchEventsById, setMatchEventsById] = useState({});
   const [eventUnavailableMatchIds, setEventUnavailableMatchIds] = useState(() => new Set());
@@ -1458,6 +1524,33 @@ function App() {
       })
       .then((data) => setReminders(Array.isArray(data.reminders) ? data.reminders : []))
       .catch((error) => console.error("Failed to load reminders:", error));
+
+    fetch(`${API_BASE_URL}/predictions/${telegramId}`)
+      .then((response) => {
+        if (!response.ok) throw new Error(`Predictions request failed: ${response.status}`);
+        return response.json();
+      })
+      .then((data) => {
+        const predictions = Array.isArray(data.predictions) ? data.predictions : [];
+        setPredictionsByMatch(Object.fromEntries(
+          predictions.map((prediction) => [String(prediction.match_id), prediction.prediction]),
+        ));
+      })
+      .catch((error) => console.error("Failed to load predictions:", error));
+
+    fetch(`${API_BASE_URL}/prediction-stats/${telegramId}`)
+      .then((response) => {
+        if (!response.ok) throw new Error(`Prediction stats request failed: ${response.status}`);
+        return response.json();
+      })
+      .then((data) => setPredictionStats({
+        points: Number(data.points) || 0,
+        correct: Number(data.correct) || 0,
+        wrong: Number(data.wrong) || 0,
+        pending: Number(data.pending) || 0,
+        total: Number(data.total) || 0,
+      }))
+      .catch((error) => console.error("Failed to load prediction stats:", error));
   }, [telegramId, telegramUser]);
 
   const toggleLang = () => {
@@ -1601,6 +1694,52 @@ function App() {
     }
   };
 
+  const saveMatchPrediction = (matchId, prediction) => {
+    if (!telegramId) {
+      setFavoriteMessage(t.unavailable);
+      return;
+    }
+
+    setSavingPredictionMatchId(matchId);
+    setPredictionSavedMatchId(null);
+    fetch(`${API_BASE_URL}/prediction`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ telegram_id: telegramId, match_id: matchId, prediction }),
+    })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          if (response.status === 409) {
+            setPredictionLockedMatchIds((currentIds) => new Set(currentIds).add(matchId));
+          }
+          throw new Error(data.detail || `Prediction request failed: ${response.status}`);
+        }
+        return data;
+      })
+      .then((data) => {
+        const predictions = Array.isArray(data.predictions) ? data.predictions : [];
+        setPredictionsByMatch(Object.fromEntries(
+          predictions.map((item) => [String(item.match_id), item.prediction]),
+        ));
+        setPredictionSavedMatchId(matchId);
+        return fetch(`${API_BASE_URL}/prediction-stats/${telegramId}`);
+      })
+      .then((response) => {
+        if (!response.ok) throw new Error(`Prediction stats request failed: ${response.status}`);
+        return response.json();
+      })
+      .then((data) => setPredictionStats({
+        points: Number(data.points) || 0,
+        correct: Number(data.correct) || 0,
+        wrong: Number(data.wrong) || 0,
+        pending: Number(data.pending) || 0,
+        total: Number(data.total) || 0,
+      }))
+      .catch((error) => console.error("Failed to save prediction:", error))
+      .finally(() => setSavingPredictionMatchId(null));
+  };
+
   const handleMatchDetailsClick = (match) => {
     if (!match?.id) return;
 
@@ -1711,6 +1850,11 @@ function App() {
         eventsUnavailable={eventUnavailableMatchIds.has(match.id)}
         eventsFailed={eventFailedMatchIds.has(match.id)}
         isScoreChanged={scoreChangedMatchIds.has(match.id)}
+        prediction={predictionsByMatch[String(match.id)] || ""}
+        onPredictionSelect={saveMatchPrediction}
+        isPredictionSaving={savingPredictionMatchId === match.id}
+        predictionWasSaved={predictionSavedMatchId === match.id}
+        predictionForceLocked={predictionLockedMatchIds.has(match.id)}
         {...options}
       />
     );
@@ -2001,6 +2145,18 @@ function App() {
               <div>
                 <span>{t.profile}</span>
                 <strong>{telegramUser ? (isUserSaved ? `✅ ${t.saved}` : `⏳ ${t.notSaved}`) : t.unavailable}</strong>
+              </div>
+            </div>
+
+            <div className="prediction-stats-card">
+              <div className="prediction-stats-heading">
+                <span>{t.predictionPoints}</span>
+                <strong>{predictionStats.points}</strong>
+              </div>
+              <div className="prediction-stats-grid">
+                <span>{t.predictionCorrect}<strong>{predictionStats.correct}</strong></span>
+                <span>{t.predictionWrong}<strong>{predictionStats.wrong}</strong></span>
+                <span>{t.predictionPending}<strong>{predictionStats.pending}</strong></span>
               </div>
             </div>
 
