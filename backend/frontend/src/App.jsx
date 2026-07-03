@@ -141,7 +141,31 @@ function normalizeTeamKey(value) {
 function normalizeMatchStatus(match) {
   const status = String(match?.status || "").toLowerCase().replace(/[-\s]/g, "_");
 
-  if (match?.is_live || status === "live") return "live";
+  const statusText = [
+    match?.status_title,
+    match?.statusTitle,
+    match?.time_elapsed,
+    match?.live_badge,
+    match?.raw_live_badge,
+    match?.raw_provider_status?.statusTitle,
+  ].filter(Boolean).join(" ").toLowerCase();
+  const activeBreak = [
+    "half time",
+    "half-time",
+    "halftime",
+    "extra time break",
+    "penalty shootout",
+    "پایان نیمه اول",
+    "بین دو نیمه",
+    "استراحت بین دو نیمه",
+    "استراحت وقت اضافه",
+    "ضربات پنالتی",
+  ].some((marker) => statusText.includes(marker));
+
+  if (match?.is_live || [
+    "live", "in_progress", "ht", "half_time", "halftime", "break", "et",
+    "extra_time_break", "penalties", "penalty_shootout", "shootout",
+  ].includes(status) || activeBreak) return "live";
   if (match?.is_finished || status === "finished") return "finished";
   if (status === "pending_result") return "pending_result";
   return "upcoming";
@@ -287,7 +311,8 @@ function getMatchStatus(match, t) {
   const normalizedStatus = normalizeMatchStatus(match);
 
   if (normalizedStatus === "live") {
-    return { key: "live", label: t.statusLive };
+    const badge = typeof match?.live_badge === "string" ? match.live_badge.trim() : "";
+    return { key: "live", label: badge || t.statusLive };
   }
 
   if (normalizedStatus === "finished") {
@@ -742,7 +767,7 @@ function MatchCard({
   isScoreChanged = false,
 }) {
   const matchStatus = getMatchStatus(match, t);
-  const isLive = match.status === "live";
+  const isLive = isLiveMatch(match);
   const matchScoreValue = getMatchScore(match);
   const matchScore =
     matchStatus.key === "upcoming" || matchStatus.key === "pending_result"

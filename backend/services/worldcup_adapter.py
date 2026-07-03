@@ -913,7 +913,11 @@ def kickoff_date_key(kickoff_utc):
 def normalize_status(status):
     normalized = str(status or "").strip().lower().replace("-", "_").replace(" ", "_")
 
-    if normalized in {"live", "in_progress", "ongoing", "1h", "2h", "ht", "et"}:
+    if normalized in {
+        "live", "in_progress", "ongoing", "1h", "2h", "ht", "half_time",
+        "halftime", "break", "et", "extra_time_break", "penalties",
+        "penalty_shootout", "shootout",
+    }:
         return "live"
 
     if normalized in {"finished", "finish", "ft", "ended", "end", "complete", "completed", "full_time", "fulltime", "final"}:
@@ -925,6 +929,61 @@ def normalize_status(status):
 def normalize_status_text(value):
     text = str(value or "").strip().lower()
     return re.sub(r"[\s\-_]+", "_", text)
+
+
+ACTIVE_BREAK_STATUSES = {
+    "ht",
+    "half_time",
+    "halftime",
+    "break",
+    "extra_time_break",
+    "penalties",
+    "penalty_shootout",
+    "shootout",
+}
+
+ACTIVE_BREAK_MARKERS = (
+    "half time",
+    "half-time",
+    "halftime",
+    "extra time break",
+    "penalty shootout",
+    "پایان نیمه اول",
+    "بین دو نیمه",
+    "استراحت بین دو نیمه",
+    "استراحت وقت اضافه",
+    "ضربات پنالتی",
+)
+
+
+def match_active_break_label(match):
+    raw_provider_status = match.get("raw_provider_status")
+    raw_provider_status = raw_provider_status if isinstance(raw_provider_status, dict) else {}
+    values = (
+        match.get("status"),
+        match.get("status_title"),
+        match.get("statusTitle"),
+        match.get("time_elapsed"),
+        match.get("match_status"),
+        match.get("live_badge"),
+        raw_provider_status.get("statusTitle"),
+        raw_provider_status.get("status_title"),
+    )
+    normalized_values = {normalize_status_text(value) for value in values if value not in (None, "")}
+    combined_text = " ".join(str(value or "").strip().lower() for value in values)
+
+    if normalized_values.intersection(ACTIVE_BREAK_STATUSES) or any(
+        marker in combined_text for marker in ACTIVE_BREAK_MARKERS
+    ):
+        if "پایان نیمه اول" in combined_text or "بین دو نیمه" in combined_text:
+            return "HT"
+        if "half" in combined_text or "ht" in normalized_values:
+            return "HT"
+        if "penalt" in combined_text or "پنالتی" in combined_text:
+            return "ضربات پنالتی"
+        return "بین دو نیمه"
+
+    return ""
 
 
 def is_true_like(value):
@@ -1080,7 +1139,11 @@ def normalize_match_status(match):
         "match_finished",
         "result",
     }
-    live_statuses = {"live", "in_progress", "ongoing", "1h", "2h", "ht", "et", "first_half", "second_half"}
+    live_statuses = {
+        "live", "in_progress", "ongoing", "1h", "2h", "ht", "half_time",
+        "halftime", "break", "et", "extra_time_break", "penalties",
+        "penalty_shootout", "shootout", "first_half", "second_half",
+    }
     cancelled_statuses = {
         "cancelled",
         "canceled",
@@ -1104,6 +1167,17 @@ def normalize_match_status(match):
         )
     )
 
+    # Half-time and other active breaks must win over generic final/title checks.
+    active_break_label = match_active_break_label(match)
+    if active_break_label:
+        return {
+            "status": "live",
+            "is_finished": False,
+            "is_live": True,
+            "is_upcoming": False,
+            "live_badge": active_break_label,
+        }
+
     if (
         is_true_like(match.get("finished"))
         or match.get("is_finished") is True
@@ -1124,6 +1198,7 @@ def normalize_match_status(match):
             "is_finished": True,
             "is_live": False,
             "is_upcoming": False,
+            "live_badge": "",
         }
 
     if (
@@ -1136,6 +1211,7 @@ def normalize_match_status(match):
             "is_finished": False,
             "is_live": True,
             "is_upcoming": False,
+            "live_badge": "LIVE",
         }
 
     if (
@@ -1149,6 +1225,7 @@ def normalize_match_status(match):
             "is_finished": False,
             "is_live": False,
             "is_upcoming": False,
+            "live_badge": "",
         }
 
     return {
@@ -1156,6 +1233,7 @@ def normalize_match_status(match):
         "is_finished": False,
         "is_live": False,
         "is_upcoming": True,
+        "live_badge": "",
     }
 
 
@@ -1627,7 +1705,10 @@ def apply_local_score_overrides(matches):
         item["score_source"] = override.get("source") or "score_override"
         item["needs_score_sync"] = False
 
-        if override_status_is_finished(override) or kickoff_is_safely_past(item, hours_after_kickoff=0):
+        current_status = normalize_match_status(item)
+        if not current_status["is_live"] and (
+            override_status_is_finished(override) or kickoff_is_safely_past(item, hours_after_kickoff=0)
+        ):
             item["status"] = "finished"
             item["is_finished"] = True
             item["is_live"] = False
@@ -1758,7 +1839,7 @@ def normalize_match(match):
         "is_finished": status_info["is_finished"],
         "is_live": status_info["is_live"],
         "is_upcoming": status_info["is_upcoming"],
-        "live_badge": status == "live",
+        "live_badge": status_info.get("live_badge") or ("LIVE" if status == "live" else ""),
         "raw_live_badge": match.get("live_badge"),
         "events": normalize_events(match.get("events") or []),
         "score_source": score_source if score_source != "unresolved" else "worldcup_wrapper",

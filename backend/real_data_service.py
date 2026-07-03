@@ -59,7 +59,8 @@ def apply_score_override(item, override):
     item["result"] = override.get("result") or item.get("result")
     item["score_source"] = override.get("source") or "score_override"
 
-    if is_finished_override(override) or kickoff_is_past(item):
+    current_status = normalize_match_status(item)
+    if not current_status["is_live"] and (is_finished_override(override) or kickoff_is_past(item)):
         item["status"] = "finished"
         item["is_finished"] = True
         item["is_live"] = False
@@ -93,7 +94,7 @@ def get_real_matches(status="all"):
             item["is_finished"] = status_info["is_finished"]
             item["is_live"] = status_info["is_live"]
             item["is_upcoming"] = status_info["is_upcoming"]
-            item["live_badge"] = item["status"] == "live"
+            item["live_badge"] = status_info.get("live_badge") or ("LIVE" if item["status"] == "live" else "")
 
         if override:
             item = apply_score_override(item, override)

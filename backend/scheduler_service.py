@@ -213,13 +213,36 @@ def provider_status_is_live(match):
         "1h",
         "2h",
         "ht",
+        "half_time",
+        "halftime",
+        "break",
         "et",
+        "extra_time_break",
+        "penalties",
+        "penalty_shootout",
+        "shootout",
         "first_half",
         "second_half",
     }
     values = provider_status_values(match)
 
-    return bool(values.intersection(live_values)) or match.get("is_live") is True
+    if bool(values.intersection(live_values)) or match.get("is_live") is True:
+        return True
+
+    title_text = " ".join(values)
+    active_markers = (
+        "half time",
+        "half-time",
+        "halftime",
+        "extra time break",
+        "penalty shootout",
+        "پایان نیمه اول",
+        "بین دو نیمه",
+        "استراحت بین دو نیمه",
+        "استراحت وقت اضافه",
+        "ضربات پنالتی",
+    )
+    return any(marker in title_text for marker in active_markers)
 
 
 def match_has_started(match):
@@ -299,6 +322,11 @@ def is_active_or_transitional(match):
         "extra time",
         "penalty shootout",
         "penalties",
+        "پایان نیمه اول",
+        "بین دو نیمه",
+        "استراحت بین دو نیمه",
+        "استراحت وقت اضافه",
+        "ضربات پنالتی",
         "نیمه",
         "استراحت",
         "وقت اضافه",
@@ -522,14 +550,21 @@ def is_scoring_event(event):
 
 
 def is_live_match(match):
-    return match.get("is_live") is True or normalized_status(match) in {
+    return provider_status_is_live(match) or normalized_status(match) in {
         "live",
         "in_progress",
         "ongoing",
         "1h",
         "2h",
         "ht",
+        "half_time",
+        "halftime",
+        "break",
         "et",
+        "extra_time_break",
+        "penalties",
+        "penalty_shootout",
+        "shootout",
     }
 
 
