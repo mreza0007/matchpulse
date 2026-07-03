@@ -307,6 +307,22 @@ function groupMatchesByDate(matches, lang) {
   return groups;
 }
 
+function getHeroMatch(liveMatches, upcomingMatches, resultMatches) {
+  return liveMatches[0] || upcomingMatches[0] || resultMatches[0] || null;
+}
+
+function getHeroMode(match) {
+  if (!match) return "empty";
+  if (isLiveMatch(match)) return "live";
+  if (isFutureMatchStatus(match)) return "upcoming";
+  return "result";
+}
+
+function filterHeroFromList(matches, heroMatch) {
+  if (!heroMatch?.id) return matches;
+  return matches.filter((match) => String(match.id) !== String(heroMatch.id));
+}
+
 function getMatchStatus(match, t) {
   const normalizedStatus = normalizeMatchStatus(match);
 
@@ -342,6 +358,12 @@ const translations = {
     nextMatchesTitle: "بازی‌های بعدی",
     nextMatches: "بازی‌های پیش‌رو",
     liveMatches: "بازی‌های در جریان",
+    heroLive: "بازی در جریان",
+    heroUpcoming: "بازی بعدی",
+    heroResult: "آخرین نتیجه",
+    otherLiveMatches: "سایر بازی‌های در جریان",
+    homeNextMatches: "بازی‌های بعدی",
+    latestResults: "آخرین نتایج",
     pastMatches: "نتایج",
     latestNews: "آخرین اخبار",
     favorites: "تیم‌های محبوب",
@@ -429,6 +451,12 @@ const translations = {
     nextMatchesTitle: "Next Matches",
     nextMatches: "Upcoming Matches",
     liveMatches: "Live Matches",
+    heroLive: "Live Now",
+    heroUpcoming: "Next Match",
+    heroResult: "Latest Result",
+    otherLiveMatches: "Other Live Matches",
+    homeNextMatches: "Next Matches",
+    latestResults: "Latest Results",
     pastMatches: "Results",
     latestNews: "Latest News",
     favorites: "Favorite Teams",
@@ -765,6 +793,7 @@ function MatchCard({
   eventsUnavailable = false,
   eventsFailed = false,
   isScoreChanged = false,
+  variant = "standard",
 }) {
   const matchStatus = getMatchStatus(match, t);
   const isLive = isLiveMatch(match);
@@ -807,7 +836,7 @@ function MatchCard({
 
   return (
     <article
-      className={`match-card ${isLive ? "live-match" : ""} ${isExpanded ? "selected" : ""}`}
+      className={`match-card ${variant === "hero" ? "hero-match-card" : ""} ${isLive ? "live-match" : ""} ${isExpanded ? "selected" : ""}`}
     >
       <div className="match-top">
         <div className="match-top-main">
@@ -899,6 +928,18 @@ function MatchCard({
         </div>
       )}
     </article>
+  );
+}
+
+function HeroMatchCard({ label, mode, children }) {
+  return (
+    <section className={`smart-hero-card ${mode}`} aria-label={label}>
+      <div className="smart-hero-heading">
+        <span className="smart-hero-kicker">{label}</span>
+        {mode === "live" && <span className="smart-hero-live-dot" aria-hidden="true" />}
+      </div>
+      {children}
+    </section>
   );
 }
 
@@ -1547,22 +1588,35 @@ function App() {
     ? `@${telegramUser.username}`
     : t.noUsername;
 
-  const nextKickoffTime = upcomingOnlyMatches.reduce(
-    (earliestKickoff, match) => Math.min(earliestKickoff, getKickoffTime(match)),
-    Number.POSITIVE_INFINITY,
-  );
-  const nextMatchesAtSameTime = Number.isFinite(nextKickoffTime)
-    ? upcomingOnlyMatches.filter((match) => Math.abs(getKickoffTime(match) - nextKickoffTime) <= 60000)
-    : [];
-  const hasLiveMatches = liveMatches.length > 0;
-  const homeFeaturedMatches = hasLiveMatches ? liveMatches : nextMatchesAtSameTime;
-  const homeFeaturedTitle = hasLiveMatches
-    ? t.liveMatches
-    : nextMatchesAtSameTime.length > 1
-      ? t.nextMatchesTitle
-      : t.nextMatch;
-  const homeFeaturedTab = hasLiveMatches ? "live" : "upcoming";
-  const homeEmptyMessage = hasLiveMatches ? t.noLiveMatches : t.noUpcomingMatches;
+  const heroMatch = getHeroMatch(liveMatches, upcomingOnlyMatches, pastOnlyMatches);
+  const heroMode = getHeroMode(heroMatch);
+  const heroLabel = {
+    live: t.heroLive,
+    upcoming: t.heroUpcoming,
+    result: t.heroResult,
+  }[heroMode] || t.nextMatch;
+  const otherLiveMatches = filterHeroFromList(liveMatches, heroMatch);
+  const upcomingWithoutHero = filterHeroFromList(upcomingOnlyMatches, heroMatch);
+  const resultsWithoutHero = filterHeroFromList(pastOnlyMatches, heroMatch);
+
+  let homeSectionMatches = [];
+  let homeSectionTitle = t.homeNextMatches;
+  let homeSectionTab = "upcoming";
+  let homeEmptyMessage = t.noUpcomingMatches;
+
+  if (heroMode === "live" && otherLiveMatches.length > 0) {
+    homeSectionMatches = otherLiveMatches;
+    homeSectionTitle = t.otherLiveMatches;
+    homeSectionTab = "live";
+    homeEmptyMessage = t.noLiveMatches;
+  } else if (heroMode === "live" || heroMode === "upcoming") {
+    homeSectionMatches = upcomingWithoutHero.slice(0, 3);
+  } else if (heroMode === "result") {
+    homeSectionMatches = resultsWithoutHero.slice(0, 3);
+    homeSectionTitle = t.latestResults;
+    homeSectionTab = "past";
+    homeEmptyMessage = t.noPastMatches;
+  }
 
   const renderMatchCard = (match, options = {}) => {
     const { homeTeam, awayTeam } = getMatchTeams(match);
@@ -1627,92 +1681,20 @@ function App() {
           </div>
         </div>
 
-        <div className="hero-card">
-          <span>{homeFeaturedTitle}</span>
-          {homeFeaturedMatches.length > 0 ? (
-            <div className="hero-next-list">
-              {homeFeaturedMatches.map((match) => {
-                const matchDateTime = formatTehranMatchDateTime(match, lang);
-                const { homeTeam, awayTeam } = getMatchTeams(match);
-                const isHomeFavorite = isTeamFavorite(homeTeam);
-                const isAwayFavorite = isTeamFavorite(awayTeam);
-                const showHeroEvents = canShowEvents(match);
-
-                return (
-                  <div className="hero-next-item" key={match.id}>
-                    <div className="hero-next-match">
-                      <strong className="hero-next-team">
-                        <TeamFlag flagEmoji={match.home_flag} teamName={match.home_en} />
-                        {getLocalizedTeamName(match, "home", lang)}
-                        <button
-                          className={`favorite-star ${isHomeFavorite ? "active" : ""}`}
-                          aria-label={isHomeFavorite ? t.removeFavorite : t.addFavorite}
-                          onClick={() => toggleFavoriteTeam(homeTeam)}
-                        >
-                          {isHomeFavorite ? "\u2605" : "\u2606"}
-                        </button>
-                      </strong>
-                      <b>
-                        {hasLiveMatches ? getMatchScore(match) || "0 - 0" : t.vs}
-                      </b>
-                      <strong className="hero-next-team">
-                        <TeamFlag flagEmoji={match.away_flag} teamName={match.away_en} />
-                        {getLocalizedTeamName(match, "away", lang)}
-                        <button
-                          className={`favorite-star ${isAwayFavorite ? "active" : ""}`}
-                          aria-label={isAwayFavorite ? t.removeFavorite : t.addFavorite}
-                          onClick={() => toggleFavoriteTeam(awayTeam)}
-                        >
-                          {isAwayFavorite ? "\u2605" : "\u2606"}
-                        </button>
-                      </strong>
-                    </div>
-                    <small>{matchDateTime.compact}</small>
-                    {showHeroEvents && (
-                      <button
-                        className="details-btn hero-details-btn"
-                        onClick={() => handleMatchDetailsClick(match)}
-                      >
-                        {t.viewEvents}
-                      </button>
-                    )}
-                    {showHeroEvents && selectedMatchId === match.id && (
-                      <div className="match-events">
-                        <h3>{t.matchEvents}</h3>
-                        {loadingEventsId === match.id ? (
-                          <p>{t.loadingEvents}</p>
-                        ) : eventFailedMatchIds.has(match.id) ? (
-                          <p>{t.eventRequestFailed}</p>
-                        ) : eventUnavailableMatchIds.has(match.id) ? (
-                          <p>{t.eventSourceUnavailable}</p>
-                        ) : (matchEventsById[match.id] || []).length > 0 ? (
-                          <ol className="event-timeline">
-                            {(matchEventsById[match.id] || []).map((event, index) => (
-                              <EventRow
-                                event={event}
-                                index={index}
-                                key={`${event.display_minute || event.raw_minute || event.minute}-${event.type}-${event.player}-${event.team}-${index}`}
-                                lang={lang}
-                                match={match}
-                                t={t}
-                              />
-                            ))}
-                          </ol>
-                        ) : (
-                          <p>{t.noEvents}</p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
+        {activeTab === "home" && (
+          heroMatch ? (
+            <HeroMatchCard label={heroLabel} mode={heroMode}>
+              {renderMatchCard(heroMatch, {
+                variant: "hero",
+                showReminder: heroMode === "upcoming",
               })}
-            </div>
+            </HeroMatchCard>
           ) : (
-            <strong>
-              {isLoadingMatches ? t.loadingMatches : matchesError || t.noUpcomingMatches}
-            </strong>
-          )}
-        </div>
+            <div className="hero-card">
+              <strong>{isLoadingMatches ? t.loadingMatches : matchesError || t.noUpcomingMatches}</strong>
+            </div>
+          )
+        )}
       </section>
 
       {activeTab === "home" && (
@@ -1738,18 +1720,18 @@ function App() {
 
           <section className="section">
             <div className="section-header">
-              <h2>{homeFeaturedTitle}</h2>
-              <span onClick={() => setActiveTab(homeFeaturedTab)}>{t.viewAll}</span>
+              <h2>{homeSectionTitle}</h2>
+              <span onClick={() => setActiveTab(homeSectionTab)}>{t.viewAll}</span>
             </div>
 
             <div className="matches">
               {isLoadingMatches && <p>{t.loadingMatches}</p>}
               {!isLoadingMatches && matchesError && <p>{matchesError}</p>}
-              {!isLoadingMatches && !matchesError && homeFeaturedMatches.length === 0 && (
+              {!isLoadingMatches && !matchesError && homeSectionMatches.length === 0 && (
                 <p>{homeEmptyMessage}</p>
               )}
-              {homeFeaturedMatches.map((match) =>
-                renderMatchCard(match, { showReminder: !hasLiveMatches }),
+              {homeSectionMatches.map((match) =>
+                renderMatchCard(match, { showReminder: isFutureMatchStatus(match) }),
               )}
             </div>
 
