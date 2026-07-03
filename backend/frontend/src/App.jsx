@@ -323,6 +323,55 @@ function filterHeroFromList(matches, heroMatch) {
   return matches.filter((match) => String(match.id) !== String(heroMatch.id));
 }
 
+function localizeCountdownDigits(value, lang) {
+  if (lang !== "fa") return value;
+  return value.replace(/\d/g, (digit) => "۰۱۲۳۴۵۶۷۸۹"[Number(digit)]);
+}
+
+function formatCountdown(milliseconds, lang) {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const twoDigits = (value) => String(value).padStart(2, "0");
+
+  if (days > 0) {
+    const dayCountdown = lang === "fa"
+      ? `${days} روز و ${twoDigits(hours)}:${twoDigits(minutes)}`
+      : `${days}d ${twoDigits(hours)}:${twoDigits(minutes)}`;
+    return localizeCountdownDigits(dayCountdown, lang);
+  }
+
+  return localizeCountdownDigits(
+    `${twoDigits(hours)}:${twoDigits(minutes)}:${twoDigits(seconds)}`,
+    lang,
+  );
+}
+
+function getHeroStatusLine(match, heroMode, lang, t, now) {
+  if (heroMode === "upcoming") {
+    const kickoffTime = getKickoffTime(match);
+    return {
+      label: t.kickoffIn,
+      value: formatCountdown(Number.isFinite(kickoffTime) ? kickoffTime - now : 0, lang),
+      isCountdown: true,
+    };
+  }
+
+  if (heroMode === "live") {
+    const liveValue = [
+      match?.live_badge,
+      match?.raw_live_badge,
+      match?.status_title,
+      match?.statusTitle,
+    ].find((value) => typeof value === "string" && value.trim() && !["true", "false"].includes(value.trim().toLowerCase()));
+    return { label: "", value: liveValue?.trim() || t.liveNow, isCountdown: false };
+  }
+
+  return { label: "", value: t.matchFinished, isCountdown: false };
+}
+
 function getMatchStatus(match, t) {
   const normalizedStatus = normalizeMatchStatus(match);
 
@@ -364,6 +413,9 @@ const translations = {
     otherLiveMatches: "سایر بازی‌های در جریان",
     homeNextMatches: "بازی‌های بعدی",
     latestResults: "آخرین نتایج",
+    kickoffIn: "شروع بازی تا",
+    liveNow: "در جریان",
+    matchFinished: "بازی به پایان رسید",
     pastMatches: "نتایج",
     latestNews: "آخرین اخبار",
     favorites: "تیم‌های محبوب",
@@ -457,6 +509,9 @@ const translations = {
     otherLiveMatches: "Other Live Matches",
     homeNextMatches: "Next Matches",
     latestResults: "Latest Results",
+    kickoffIn: "Kickoff in",
+    liveNow: "Live now",
+    matchFinished: "Match finished",
     pastMatches: "Results",
     latestNews: "Latest News",
     favorites: "Favorite Teams",
@@ -931,12 +986,27 @@ function MatchCard({
   );
 }
 
-function HeroMatchCard({ label, mode, children }) {
+function HeroMatchCard({ label, mode, match, lang, t, children }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (mode !== "upcoming") return undefined;
+
+    const countdownTimer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(countdownTimer);
+  }, [match?.id, mode]);
+
+  const statusLine = getHeroStatusLine(match, mode, lang, t, now);
+
   return (
     <section className={`smart-hero-card ${mode}`} aria-label={label}>
       <div className="smart-hero-heading">
         <span className="smart-hero-kicker">{label}</span>
         {mode === "live" && <span className="smart-hero-live-dot" aria-hidden="true" />}
+      </div>
+      <div className={`smart-hero-status ${statusLine.isCountdown ? "countdown" : ""}`}>
+        {statusLine.label && <span>{statusLine.label}</span>}
+        <strong dir={statusLine.isCountdown ? "ltr" : t.dir}>{statusLine.value}</strong>
       </div>
       {children}
     </section>
@@ -1683,7 +1753,7 @@ function App() {
 
         {activeTab === "home" && (
           heroMatch ? (
-            <HeroMatchCard label={heroLabel} mode={heroMode}>
+            <HeroMatchCard key={`${heroMatch.id}-${heroMode}`} label={heroLabel} mode={heroMode} match={heroMatch} lang={lang} t={t}>
               {renderMatchCard(heroMatch, {
                 variant: "hero",
                 showReminder: heroMode === "upcoming",

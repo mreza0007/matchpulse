@@ -2300,6 +2300,47 @@ h1 {
   letter-spacing: 0;
 }
 
+.smart-hero-status {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 5px 9px;
+  margin-inline: 4px;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  border-radius: 10px;
+  background: rgba(2, 8, 15, 0.34);
+  color: var(--theme-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.smart-hero-status strong {
+  color: var(--theme-text);
+  font-family: "Space Grotesk", "Vazirmatn", system-ui, sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.025em;
+  white-space: nowrap;
+}
+
+.smart-hero-card.live .smart-hero-status {
+  border-color: rgba(var(--theme-live-rgb), 0.16);
+  color: #ffb4b4;
+}
+
+.smart-hero-card.live .smart-hero-status strong {
+  color: #ffc2c2;
+}
+
+.smart-hero-card.result .smart-hero-status strong {
+  color: var(--theme-accent-soft);
+}
+
 .smart-hero-card .hero-match-card,
 .smart-hero-card .hero-match-card:hover {
   padding: 20px 16px 16px;
