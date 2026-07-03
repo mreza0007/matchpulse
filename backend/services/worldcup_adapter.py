@@ -931,6 +931,40 @@ def normalize_status_text(value):
     return re.sub(r"[\s\-_]+", "_", text)
 
 
+def is_football_data_source(source):
+    normalized = str(source or "").strip().lower().replace("_", "-")
+    return normalized in {"football-data.org", "football-data", "footballdata.org", "footballdata"}
+
+
+def is_trusted_score_override(override):
+    return isinstance(override, dict) and not is_football_data_source(override.get("source"))
+
+
+def visible_match_result(match, result, score_source, home_score, away_score):
+    value = str(result or "").strip()
+    if not value:
+        return None
+
+    if value.lower() in {"home", "away", "draw"}:
+        return value.lower()
+
+    if is_football_data_source(score_source):
+        return None
+
+    home_name = str(match.get("home_en") or match.get("home_team_name_en") or match.get("home_team") or "").strip()
+    away_name = str(match.get("away_en") or match.get("away_team_name_en") or match.get("away_team") or "").strip()
+    lowered_result = value.casefold()
+
+    if home_name and away_name and home_name.casefold() in lowered_result and away_name.casefold() in lowered_result:
+        return value
+
+    trusted_sources = {"raw_final", "raw_score", "events", "scorers", "worldcup_wrapper", "varzesh3"}
+    if score_source in trusted_sources and home_name and away_name and home_score is not None and away_score is not None:
+        return f"{home_name} {home_score} - {away_score} {away_name}"
+
+    return None
+
+
 ACTIVE_BREAK_STATUSES = {
     "ht",
     "half_time",
@@ -1684,7 +1718,7 @@ def apply_local_score_overrides(matches):
         item = dict(match)
         override = overrides.get(item.get("id"))
 
-        if not override:
+        if not is_trusted_score_override(override):
             adjusted_matches.append(attach_visibility_flags(item))
             continue
 
@@ -1724,6 +1758,13 @@ def normalize_match(match):
     if not isinstance(match, dict):
         return None
 
+    match = dict(match)
+    incoming_score_source = match.get("score_source") or match.get("source")
+    if is_football_data_source(incoming_score_source):
+        for key in ("home_score", "homeScore", "away_score", "awayScore", "result"):
+            match[key] = None
+        match["score"] = {}
+
     match_id = first_value(match, ("id", "internal_match_id", "match_id", "matchId"))
     normalized_match_id = coerce_int(match_id)
     score = match.get("score") if isinstance(match.get("score"), dict) else {}
@@ -1756,6 +1797,14 @@ def normalize_match(match):
     away_name_en = first_team_text(match, "away", language="en")
     home_name_fa = first_team_text(match, "home", language="fa") or placeholder_fa(home_name_en)
     away_name_fa = first_team_text(match, "away", language="fa") or placeholder_fa(away_name_en)
+    normalized_score_source = score_source if score_source != "unresolved" else "worldcup_wrapper"
+    visible_result = visible_match_result(
+        {**match, "home_en": home_name_en, "away_en": away_name_en},
+        match.get("result"),
+        normalized_score_source,
+        coerce_int(home_score),
+        coerce_int(away_score),
+    )
     home_flag = match.get("home_flag") or match.get("home_team_flag") or ""
     away_flag = match.get("away_flag") or match.get("away_team_flag") or ""
     stage, stage_label = resolve_stage(match)
@@ -1842,7 +1891,7 @@ def normalize_match(match):
         "live_badge": status_info.get("live_badge") or ("LIVE" if status == "live" else ""),
         "raw_live_badge": match.get("live_badge"),
         "events": normalize_events(match.get("events") or []),
-        "score_source": score_source if score_source != "unresolved" else "worldcup_wrapper",
+        "score_source": normalized_score_source,
         "needs_score_sync": score_source == "unresolved" and kickoff_is_safely_past(match) and raw_score_is_placeholder(match),
         "kickoff": wrapper_kickoff or wrapper_kickoff_utc or fallback_kickoff_iso,
         "kickoff_utc": wrapper_kickoff_utc or wrapper_kickoff or fallback_kickoff_utc_iso,
@@ -1864,7 +1913,7 @@ def normalize_match(match):
         "stage_label": stage_label,
         "stadium": match.get("stadium") or match.get("stadium_name_en") or "",
         "city": match.get("city") or match.get("stadium_city_en") or "",
-        "result": match.get("result"),
+        "result": visible_result,
         "last_updated": match.get("last_updated"),
     }
     event_button, event_button_reason = event_button_visibility(normalized_item)

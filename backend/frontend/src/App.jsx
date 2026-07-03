@@ -847,7 +847,7 @@ function MatchCard({
         <span>📍 {match.city}</span>
       </div>
 
-      {match.result && (
+      {match.result && match.score_source !== "football-data.org" && (
         <div className="match-info">
           <span>📊 {match.result}</span>
         </div>

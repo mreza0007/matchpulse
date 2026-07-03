@@ -4,7 +4,9 @@ from services.worldcup_adapter import (
     get_matches_from_worldcup_wrapper,
     get_teams_from_worldcup_wrapper,
     event_button_visibility,
+    is_trusted_score_override,
     normalize_match_status,
+    visible_match_result,
 )
 from db_service import get_all_match_score_overrides_from_db
 import time
@@ -44,6 +46,9 @@ def kickoff_is_past(match):
 
 
 def apply_score_override(item, override):
+    if not is_trusted_score_override(override):
+        return item
+
     home_score = override.get("home_score")
     away_score = override.get("away_score")
 
@@ -58,6 +63,13 @@ def apply_score_override(item, override):
     }
     item["result"] = override.get("result") or item.get("result")
     item["score_source"] = override.get("source") or "score_override"
+    item["result"] = visible_match_result(
+        item,
+        item.get("result"),
+        item["score_source"],
+        home_score,
+        away_score,
+    )
 
     current_status = normalize_match_status(item)
     if not current_status["is_live"] and (is_finished_override(override) or kickoff_is_past(item)):
@@ -78,6 +90,8 @@ def get_real_matches(status="all"):
     for match in get_matches_from_worldcup_wrapper():
         item = dict(match)
         override = score_overrides.get(item.get("id"))
+        if not is_trusted_score_override(override):
+            override = None
 
         if override:
             item = apply_score_override(item, override)
