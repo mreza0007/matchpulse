@@ -3,19 +3,19 @@
 :root,
 .theme-midnight-gold {
   color-scheme: dark;
-  --theme-bg: #0b1020;
-  --theme-surface: #121936;
-  --theme-card: #182142;
-  --theme-accent: #d9b66b;
-  --theme-accent-soft: #f0d79a;
-  --theme-accent-secondary: #7387d8;
-  --theme-text: #f5f7ff;
-  --theme-muted: #b9c2e3;
-  --theme-border: rgba(217, 182, 107, 0.18);
-  --theme-live: #4ade80;
-  --theme-accent-rgb: 217, 182, 107;
-  --theme-secondary-rgb: 115, 135, 216;
-  --theme-live-rgb: 74, 222, 128;
+  --theme-bg: #050b14;
+  --theme-surface: #07111f;
+  --theme-card: #0b1828;
+  --theme-accent: #d6a84f;
+  --theme-accent-soft: #e8c77d;
+  --theme-accent-secondary: #284363;
+  --theme-text: #f7f9fc;
+  --theme-muted: #93a3b8;
+  --theme-border: rgba(255, 255, 255, 0.085);
+  --theme-live: #ef4444;
+  --theme-accent-rgb: 214, 168, 79;
+  --theme-secondary-rgb: 40, 67, 99;
+  --theme-live-rgb: 239, 68, 68;
 }
 
 .theme-royal-indigo {
@@ -98,9 +98,9 @@ body {
   margin: 0;
   min-height: 100vh;
   background:
-    radial-gradient(circle at 12% -8%, rgba(var(--theme-secondary-rgb), 0.16), transparent 34%),
-    radial-gradient(circle at 90% 2%, rgba(var(--theme-accent-rgb), 0.1), transparent 32%),
-    linear-gradient(180deg, var(--theme-bg) 0%, var(--theme-surface) 50%, var(--theme-bg) 100%);
+    radial-gradient(ellipse at 16% -12%, rgba(108, 142, 180, 0.16), transparent 34%),
+    radial-gradient(ellipse at 84% -10%, rgba(255, 255, 255, 0.075), transparent 28%),
+    linear-gradient(180deg, #050b14 0%, #07111f 48%, #050b14 100%);
   color: var(--text);
   font-family: "Vazirmatn", "Vazir", "IRANSans", "B Yekan", "B Nazanin", "Tahoma", system-ui, sans-serif;
   font-size: 15px;
@@ -2214,17 +2214,352 @@ h1 {
   box-shadow: inset 0 0 0 1px rgba(var(--theme-accent-rgb), 0.2);
 }
 
+/* Premium Stadium Dark: restrained surfaces with the hero as the scoreboard. */
+.hero {
+  gap: 16px;
+  padding: 17px;
+  border-color: rgba(255, 255, 255, 0.09);
+  border-radius: 20px;
+  background:
+    linear-gradient(155deg, rgba(255, 255, 255, 0.045), transparent 38%),
+    radial-gradient(ellipse at 50% -18%, rgba(114, 151, 192, 0.14), transparent 48%),
+    linear-gradient(145deg, #0a1727, #07111f 66%, #050b14);
+  box-shadow: 0 20px 54px rgba(0, 0, 0, 0.34);
+}
+
+.hero::before {
+  background:
+    linear-gradient(112deg, transparent 18%, rgba(255, 255, 255, 0.035) 48%, transparent 70%),
+    radial-gradient(circle at 12% 0%, rgba(255, 255, 255, 0.07), transparent 22%),
+    radial-gradient(circle at 88% 0%, rgba(255, 255, 255, 0.06), transparent 22%);
+}
+
+.hero h1 {
+  color: var(--theme-text);
+  background: none;
+  -webkit-text-fill-color: currentColor;
+  text-shadow: 0 8px 30px rgba(0, 0, 0, 0.28);
+}
+
+.eyebrow,
+.brand-copy small {
+  color: var(--theme-muted);
+}
+
+.brand-logo {
+  border-color: rgba(var(--theme-accent-rgb), 0.28);
+  background: #0a1625;
+  box-shadow:
+    0 12px 28px rgba(0, 0, 0, 0.3),
+    0 0 0 4px rgba(255, 255, 255, 0.025);
+}
+
+.lang-btn {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--theme-text);
+}
+
+.stats-row div {
+  padding-block: 10px;
+  border-color: rgba(255, 255, 255, 0.065);
+  border-radius: 10px;
+  background: rgba(3, 8, 15, 0.34);
+}
+
+.stats-row strong {
+  color: var(--theme-text);
+  font-size: 18px;
+}
+
+.smart-hero-card {
+  padding: 9px;
+  border-color: rgba(var(--theme-accent-rgb), 0.24);
+  border-radius: 16px;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(var(--theme-accent-rgb), 0.105), transparent 52%),
+    linear-gradient(160deg, #101d2d, #081321 68%);
+  box-shadow:
+    0 22px 46px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.065);
+}
+
+.smart-hero-card.live {
+  border-color: rgba(var(--theme-live-rgb), 0.34);
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(var(--theme-live-rgb), 0.1), transparent 52%),
+    linear-gradient(160deg, #111c2a, #081321 68%);
+  box-shadow:
+    0 22px 46px rgba(0, 0, 0, 0.36),
+    0 0 26px rgba(var(--theme-live-rgb), 0.055);
+}
+
+.smart-hero-kicker {
+  color: var(--theme-accent-soft);
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+.smart-hero-card .hero-match-card,
+.smart-hero-card .hero-match-card:hover {
+  padding: 20px 16px 16px;
+  border-color: rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  background: rgba(3, 9, 17, 0.38);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+.hero-match-card .teams {
+  margin-block: 26px 21px;
+}
+
+.hero-match-card .teams > .match-score {
+  min-width: 96px;
+  min-height: 58px;
+  border-color: rgba(var(--theme-accent-rgb), 0.28);
+  background: linear-gradient(180deg, rgba(var(--theme-accent-rgb), 0.13), rgba(255, 255, 255, 0.025));
+  font-family: "Space Grotesk", system-ui, sans-serif;
+  font-size: 30px;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.26);
+}
+
+.hero-match-card.live-match .teams > .match-score {
+  border-color: rgba(var(--theme-live-rgb), 0.32);
+  background: linear-gradient(180deg, rgba(var(--theme-live-rgb), 0.12), rgba(255, 255, 255, 0.025));
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+}
+
+.hero-match-card .team-name {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.hero-match-card .match-status.live {
+  border-color: rgba(var(--theme-live-rgb), 0.4);
+  background: rgba(var(--theme-live-rgb), 0.13);
+  color: #ffb4b4;
+  box-shadow: none;
+}
+
+.quick-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-block: 16px 22px;
+}
+
+.quick-actions button {
+  min-height: 48px;
+  padding: 10px 12px;
+  border-color: rgba(255, 255, 255, 0.07);
+  border-radius: 11px;
+  background: #0a1625;
+  box-shadow: none;
+}
+
+.quick-actions button:hover {
+  border-color: rgba(var(--theme-accent-rgb), 0.22);
+  background: #0d1a2a;
+}
+
+.quick-actions button span {
+  border-color: transparent;
+  background: transparent;
+  color: var(--theme-accent-soft);
+}
+
+.quick-actions button:first-child span {
+  color: var(--theme-live);
+}
+
+.section-header h2 {
+  font-size: 19px;
+  font-weight: 700;
+}
+
+.section-header span {
+  color: var(--theme-muted);
+  font-size: 12px;
+}
+
+.match-card,
+.news-card,
+.team-card,
+.profile-card {
+  border-color: rgba(255, 255, 255, 0.075);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #0c1929, #091522);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.22);
+}
+
+.match-card {
+  padding: 15px;
+}
+
+.match-card:hover,
+.news-card:hover,
+.team-card:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: linear-gradient(180deg, #0e1c2d, #0a1725);
+}
+
+.match-card.live-match {
+  border-color: rgba(var(--theme-live-rgb), 0.28);
+  background: linear-gradient(145deg, rgba(var(--theme-live-rgb), 0.065), #0c1929 46%, #091522);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.25);
+  animation: none;
+}
+
+.match-stage {
+  padding: 4px 8px;
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--theme-muted);
+  font-size: 11px;
+}
+
+.match-status.live,
+.bracket-status.live {
+  border-color: rgba(var(--theme-live-rgb), 0.35);
+  background: rgba(var(--theme-live-rgb), 0.12);
+  color: #ffaaaa;
+}
+
+.live-pulse::before {
+  background: var(--theme-live);
+  box-shadow: none;
+}
+
+.live-pulse::after {
+  border-color: rgba(var(--theme-live-rgb), 0.34);
+}
+
+.teams {
+  margin-block: 18px 14px;
+}
+
+.team-name {
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.teams > .match-score,
+.teams > .match-score-pending {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: #07111d;
+  color: var(--theme-text);
+  font-family: "Space Grotesk", system-ui, sans-serif;
+  box-shadow: none;
+}
+
+.match-meta-grid {
+  gap: 4px 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.match-meta-grid span,
+.match-info span {
+  padding: 3px 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--theme-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.favorite-star {
+  width: 28px;
+  height: 28px;
+  border-color: rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.035);
+  color: #7f8da1;
+}
+
+.favorite-star.active {
+  border-color: rgba(var(--theme-accent-rgb), 0.3);
+  background: rgba(var(--theme-accent-rgb), 0.1);
+  color: var(--theme-accent-soft);
+}
+
+.remind-btn,
+.details-btn,
+.chip-btn {
+  border-radius: 10px;
+  box-shadow: none;
+}
+
+.remind-btn {
+  border-color: rgba(var(--theme-accent-rgb), 0.38);
+  background: var(--theme-accent);
+  color: #101722;
+  font-weight: 800;
+}
+
+.remind-btn.active {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: #111e2e;
+  color: var(--theme-muted);
+}
+
+.match-card:not(.hero-match-card) .remind-btn {
+  border-color: rgba(var(--theme-accent-rgb), 0.24);
+  background: rgba(var(--theme-accent-rgb), 0.075);
+  color: var(--theme-accent-soft);
+  font-weight: 700;
+}
+
+.match-card:not(.hero-match-card) .remind-btn.active {
+  border-color: rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--theme-muted);
+}
+
+.details-btn {
+  border-color: rgba(255, 255, 255, 0.11);
+  background: #111f30;
+  color: var(--theme-text);
+}
+
+.live-match .details-btn {
+  border-color: rgba(var(--theme-live-rgb), 0.3);
+  background: rgba(var(--theme-live-rgb), 0.09);
+  color: #ffb4b4;
+}
+
+.bottom-nav {
+  padding: 5px;
+  border-color: rgba(255, 255, 255, 0.09);
+  border-radius: 16px;
+  background: rgba(5, 11, 20, 0.94);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.34);
+}
+
+.bottom-nav button {
+  min-height: 42px;
+  padding: 6px 2px;
+  border-radius: 10px;
+  color: #78889d;
+  font-size: 9.5px;
+}
+
+.bottom-nav button.active {
+  background: rgba(var(--theme-accent-rgb), 0.1);
+  color: var(--theme-accent-soft);
+  box-shadow: inset 0 -2px 0 var(--theme-accent);
+}
+
 @keyframes livePulse {
   0% {
-    box-shadow: 0 0 0 0 rgba(105, 255, 196, 0.58);
+    box-shadow: 0 0 0 0 rgba(var(--theme-live-rgb), 0.5);
   }
 
   70% {
-    box-shadow: 0 0 0 8px rgba(105, 255, 196, 0);
+    box-shadow: 0 0 0 8px rgba(var(--theme-live-rgb), 0);
   }
 
   100% {
-    box-shadow: 0 0 0 0 rgba(105, 255, 196, 0);
+    box-shadow: 0 0 0 0 rgba(var(--theme-live-rgb), 0);
   }
 }
 
