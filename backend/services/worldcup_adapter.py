@@ -382,7 +382,7 @@ def repair_text(value):
 
     candidates = [text]
 
-    for encoding in ("latin1", "cp1252"):
+    for encoding in ("latin1", "cp1252", "cp1256"):
         try:
             candidate = text.encode(encoding).decode("utf-8").strip()
         except (UnicodeEncodeError, UnicodeDecodeError):
@@ -391,7 +391,14 @@ def repair_text(value):
         if candidate and candidate not in candidates:
             candidates.append(candidate)
 
-    return max(candidates, key=lambda candidate: (count_persian_chars(candidate), -candidate.count("\ufffd")))
+    return max(
+        candidates,
+        key=lambda candidate: (
+            -sum(candidate.count(marker) for marker in ("ظ", "ط", "غ")),
+            count_persian_chars(candidate),
+            -candidate.count("\ufffd"),
+        ),
+    )
 
 
 def minute_token_pattern():
@@ -927,7 +934,7 @@ def normalize_status(status):
 
 
 def normalize_status_text(value):
-    text = str(value or "").strip().lower()
+    text = str(repair_text(value) or "").strip().lower()
     return re.sub(r"[\s\-_]+", "_", text)
 
 
@@ -986,6 +993,7 @@ ACTIVE_BREAK_MARKERS = (
     "extra time break",
     "penalty shootout",
     "\u067e\u0627\u06cc\u0627\u0646 \u0646\u06cc\u0645\u0647 \u0627\u0648\u0644",
+    "\u067e\u0627\u06cc\u0627\u0646 \u0646\u06cc\u0645\u0647",
     "\u0628\u06cc\u0646 \u062f\u0648 \u0646\u06cc\u0645\u0647",
     "\u0627\u0633\u062a\u0631\u0627\u062d\u062a \u0628\u06cc\u0646 \u062f\u0648 \u0646\u06cc\u0645\u0647",
     "\u0627\u0633\u062a\u0631\u0627\u062d\u062a \u0648\u0642\u062a \u0627\u0636\u0627\u0641\u0647",
@@ -1009,12 +1017,12 @@ def match_active_break_label(match):
         raw_provider_status.get("status_title"),
     )
     normalized_values = {normalize_status_text(value) for value in values if value not in (None, "")}
-    combined_text = " ".join(str(value or "").strip().lower() for value in values)
+    combined_text = " ".join(str(repair_text(value) or "").strip().lower() for value in values)
 
     if normalized_values.intersection(ACTIVE_BREAK_STATUSES) or any(
         marker in combined_text for marker in ACTIVE_BREAK_MARKERS
     ):
-        if "\u067e\u0627\u06cc\u0627\u0646 \u0646\u06cc\u0645\u0647 \u0627\u0648\u0644" in combined_text or "\u0628\u06cc\u0646 \u062f\u0648 \u0646\u06cc\u0645\u0647" in combined_text:
+        if "\u067e\u0627\u06cc\u0627\u0646 \u0646\u06cc\u0645\u0647" in combined_text or "\u0628\u06cc\u0646 \u062f\u0648 \u0646\u06cc\u0645\u0647" in combined_text:
             return "HT"
         if "half" in combined_text or "ht" in normalized_values:
             return "HT"
@@ -1023,6 +1031,59 @@ def match_active_break_label(match):
         return "\u0628\u06cc\u0646 \u062f\u0648 \u0646\u06cc\u0645\u0647"
 
     return ""
+
+
+def live_minute_badge(value):
+    text = normalize_digits(repair_text(value) or "").strip()
+    match = re.fullmatch(r"(\d{1,3}(?:\s*\+\s*\d{1,2})?)\s*['\u2032\u2019]?", text)
+    if not match:
+        return ""
+    minute = re.sub(r"\s+", "", match.group(1))
+    return f"{minute}'"
+
+
+def best_live_badge(match, active_break_label=""):
+    if active_break_label:
+        return active_break_label
+
+    values = (
+        match.get("raw_live_badge"),
+        match.get("live_badge"),
+        match.get("time_elapsed"),
+        match.get("raw_minute"),
+        match.get("minute"),
+        match.get("status_title"),
+        match.get("statusTitle"),
+    )
+    for value in values:
+        minute_badge = live_minute_badge(value)
+        if minute_badge:
+            return minute_badge
+
+    return "LIVE"
+
+
+def raw_live_signal(match):
+    values = (match.get("raw_live_badge"), match.get("live_badge"), match.get("time_elapsed"))
+    for value in values:
+        normalized = normalize_status_text(value)
+        if normalized in {"live", "1h", "2h", "ht", "et"} or live_minute_badge(value):
+            return True
+    return False
+
+
+def explicit_full_time_signal(match, raw_provider_status):
+    values = (
+        match.get("status_title"),
+        match.get("statusTitle"),
+        match.get("time_elapsed"),
+        raw_provider_status.get("statusTitle"),
+        raw_provider_status.get("status_title"),
+    )
+    normalized = {normalize_status_text(value) for value in values if value not in (None, "")}
+    final_markers = {"ft", "full_time", "fulltime", "final", "final_score", "match_finished", "result"}
+    combined = " ".join(str(repair_text(value) or "").lower() for value in values)
+    return bool(normalized.intersection(final_markers)) or str(raw_provider_status.get("status") or "") in {"7", "90", "100"} or "\u0646\u062a\u06cc\u062c\u0647 \u0646\u0647\u0627\u06cc\u06cc" in combined
 
 
 def is_true_like(value):
@@ -1139,14 +1200,15 @@ def attach_visibility_flags(match):
 
 def normalize_match_status(match):
     raw_provider_status = match.get("raw_provider_status")
+    raw_provider_status = raw_provider_status if isinstance(raw_provider_status, dict) else {}
     raw_status_value = None
     raw_status_title = ""
     raw_is_live = False
 
-    if isinstance(raw_provider_status, dict):
+    if raw_provider_status:
         raw_status_value = raw_provider_status.get("status")
-        raw_status_title = str(raw_provider_status.get("statusTitle") or "")
-        raw_is_live = bool(raw_provider_status.get("isLive"))
+        raw_status_title = str(repair_text(raw_provider_status.get("statusTitle")) or "")
+        raw_is_live = is_true_like(raw_provider_status.get("isLive"))
 
     status_candidates = [
         match.get("status"),
@@ -1193,7 +1255,7 @@ def normalize_match_status(match):
         "abandoned",
         "delayed",
     }
-    raw_status_text = " ".join(str(value or "") for value in status_candidates)
+    raw_status_text = " ".join(str(repair_text(value) or "") for value in status_candidates)
     is_cancelled_or_postponed = bool(normalized_candidates.intersection(cancelled_statuses))
     is_safely_past = kickoff_is_safely_past(match)
     score_source = match.get("_score_source")
@@ -1210,13 +1272,14 @@ def normalize_match_status(match):
 
     # Half-time and other active breaks must win over generic final/title checks.
     active_break_label = match_active_break_label(match)
-    if active_break_label:
+    has_raw_live_signal = raw_live_signal(match)
+    if active_break_label or (has_raw_live_signal and not explicit_full_time_signal(match, raw_provider_status)):
         return {
             "status": "live",
             "is_finished": False,
             "is_live": True,
             "is_upcoming": False,
-            "live_badge": active_break_label,
+            "live_badge": best_live_badge(match, active_break_label),
         }
 
     if (
@@ -1252,7 +1315,7 @@ def normalize_match_status(match):
             "is_finished": False,
             "is_live": True,
             "is_upcoming": False,
-            "live_badge": "LIVE",
+            "live_badge": best_live_badge(match),
         }
 
     if (
@@ -1892,11 +1955,12 @@ def normalize_match(match):
             "away": coerce_int(away_score),
         },
         "status": status,
+        "status_title": repair_text(match.get("status_title") or match.get("statusTitle")) or "",
         "is_finished": status_info["is_finished"],
         "is_live": status_info["is_live"],
         "is_upcoming": status_info["is_upcoming"],
         "live_badge": status_info.get("live_badge") or ("LIVE" if status == "live" else ""),
-        "raw_live_badge": match.get("live_badge"),
+        "raw_live_badge": match.get("raw_live_badge") or match.get("live_badge"),
         "events": normalize_events(match.get("events") or []),
         "score_source": normalized_score_source,
         "needs_score_sync": score_source == "unresolved" and kickoff_is_safely_past(match) and raw_score_is_placeholder(match),

@@ -285,7 +285,7 @@ def delete_reminder(data: ReminderData):
 
 def prediction_match(match_id):
     return next(
-        (match for match in get_real_matches(status="all") if match.get("id") == match_id),
+        (match for match in get_real_matches(status="all") if str(match.get("id")) == str(match_id)),
         None,
     )
 

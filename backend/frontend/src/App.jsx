@@ -161,10 +161,14 @@ function normalizeMatchStatus(match) {
     "extra time break",
     "penalty shootout",
     "\u067e\u0627\u06cc\u0627\u0646 \u0646\u06cc\u0645\u0647 \u0627\u0648\u0644",
+    "\u067e\u0627\u06cc\u0627\u0646 \u0646\u06cc\u0645\u0647",
     "\u0628\u06cc\u0646 \u062f\u0648 \u0646\u06cc\u0645\u0647",
     "\u0627\u0633\u062a\u0631\u0627\u062d\u062a \u0628\u06cc\u0646 \u062f\u0648 \u0646\u06cc\u0645\u0647",
     "\u0627\u0633\u062a\u0631\u0627\u062d\u062a \u0648\u0642\u062a \u0627\u0636\u0627\u0641\u0647",
     "\u0636\u0631\u0628\u0627\u062a \u067e\u0646\u0627\u0644\u062a\u06cc",
+    "ظ¾ط§غŒط§ظ† ظ†غŒظ…ظ‡",
+    "ظ¾ط§غŒط§ظ† ظ†غŒظ…ظ‡ ط§ظˆظ„",
+    "ط¨غŒظ† ط¯ظˆ ظ†غŒظ…ظ‡",
   ].some((marker) => statusText.includes(marker));
 
   if (match?.is_live || [
@@ -368,6 +372,35 @@ function formatCountdown(milliseconds, lang) {
   );
 }
 
+function getLiveDisplayBadge(match, t) {
+  const values = [
+    match?.raw_live_badge,
+    match?.time_elapsed,
+    match?.raw_minute,
+    match?.minute,
+    match?.status_title,
+    match?.statusTitle,
+    match?.live_badge,
+  ].filter((value) => value !== null && value !== undefined && String(value).trim());
+  const minutePattern = /(?:^|\s)([0-9۰-۹٠-٩]{1,3}(?:\s*\+\s*[0-9۰-۹٠-٩]{1,2})?)\s*['′’]?(?:$|\s)/;
+
+  for (const value of values) {
+    const matchMinute = String(value).trim().match(minutePattern);
+    if (matchMinute) return `${matchMinute[1].replace(/\s+/g, "")}'`;
+  }
+
+  const statusText = values.join(" ").toLowerCase();
+  const breakMarkers = [
+    "ht", "half time", "half-time", "halftime", "interval", "between halves",
+    "\u067e\u0627\u06cc\u0627\u0646 \u0646\u06cc\u0645\u0647", "\u0628\u06cc\u0646 \u062f\u0648 \u0646\u06cc\u0645\u0647",
+    "ظ¾ط§غŒط§ظ† ظ†غŒظ…ظ‡", "ط¨غŒظ† ط¯ظˆ ظ†غŒظ…ظ‡",
+  ];
+  if (breakMarkers.some((marker) => statusText.includes(marker))) return t.halfTime;
+
+  const meaningful = values.find((value) => !["live", "true", "false"].includes(String(value).trim().toLowerCase()));
+  return meaningful ? String(meaningful).trim() : t.liveNow;
+}
+
 function getHeroStatusLine(match, heroMode, lang, t, now) {
   if (heroMode === "upcoming") {
     const kickoffTime = getKickoffTime(match);
@@ -379,13 +412,7 @@ function getHeroStatusLine(match, heroMode, lang, t, now) {
   }
 
   if (heroMode === "live") {
-    const liveValue = [
-      match?.live_badge,
-      match?.raw_live_badge,
-      match?.status_title,
-      match?.statusTitle,
-    ].find((value) => typeof value === "string" && value.trim() && !["true", "false"].includes(value.trim().toLowerCase()));
-    return { label: "", value: liveValue?.trim() || t.liveNow, isCountdown: false };
+    return { label: "", value: getLiveDisplayBadge(match, t), isCountdown: false };
   }
 
   return { label: "", value: t.matchFinished, isCountdown: false };
@@ -395,8 +422,7 @@ function getMatchStatus(match, t) {
   const normalizedStatus = normalizeMatchStatus(match);
 
   if (normalizedStatus === "live") {
-    const badge = typeof match?.live_badge === "string" ? match.live_badge.trim() : "";
-    return { key: "live", label: badge || t.statusLive };
+    return { key: "live", label: getLiveDisplayBadge(match, t) };
   }
 
   if (normalizedStatus === "finished") {
@@ -434,6 +460,7 @@ const translations = {
     latestResults: "آخرین نتایج",
     kickoffIn: "شروع بازی تا",
     liveNow: "در جریان",
+    halfTime: "بین دو نیمه",
     matchFinished: "بازی به پایان رسید",
     pastMatches: "نتایج",
     latestNews: "آخرین اخبار",
@@ -448,6 +475,8 @@ const translations = {
     predictionWin: "برد {team}",
     predictionDraw: "مساوی",
     predictionSaved: "پیش‌بینی ثبت شد",
+    yourPrediction: "پیش‌بینی شما",
+    predictionSaveFailed: "ثبت پیش‌بینی ناموفق بود",
     predictionLocked: "پیش‌بینی قفل شد",
     predictionPoints: "امتیاز پیش‌بینی",
     predictionCorrect: "درست",
@@ -539,6 +568,7 @@ const translations = {
     latestResults: "Latest Results",
     kickoffIn: "Kickoff in",
     liveNow: "Live now",
+    halfTime: "HT",
     matchFinished: "Match finished",
     pastMatches: "Results",
     latestNews: "Latest News",
@@ -553,6 +583,8 @@ const translations = {
     predictionWin: "{team} win",
     predictionDraw: "Draw",
     predictionSaved: "Prediction saved",
+    yourPrediction: "Your prediction",
+    predictionSaveFailed: "Prediction could not be saved",
     predictionLocked: "Prediction locked",
     predictionPoints: "Prediction points",
     predictionCorrect: "Correct",
@@ -890,6 +922,7 @@ function MatchCard({
   onPredictionSelect,
   isPredictionSaving = false,
   predictionWasSaved = false,
+  predictionSaveFailed = false,
   predictionForceLocked = false,
 }) {
   const matchStatus = getMatchStatus(match, t);
@@ -942,7 +975,7 @@ function MatchCard({
           <span className="match-date">{matchDateTime.date}</span>
           <span className="match-stage">{match.stage_label || match.stage}</span>
         </div>
-        {isLive && <span className="match-status live live-pulse">{matchStatus.label}</span>}
+        {isLive && variant !== "hero" && <span className="match-status live live-pulse">{matchStatus.label}</span>}
       </div>
 
       <div className="match-score-block">
@@ -1001,6 +1034,12 @@ function MatchCard({
               </button>
             ))}
           </div>
+          {prediction && (
+            <p className="prediction-selection">
+              {t.yourPrediction}: <strong>{getPredictionLabel(match, prediction, lang, t)}</strong>
+            </p>
+          )}
+          {predictionSaveFailed && <p className="prediction-error">{t.predictionSaveFailed}</p>}
         </div>
       )}
 
@@ -1248,6 +1287,7 @@ function App() {
   const [savingPredictionMatchId, setSavingPredictionMatchId] = useState(null);
   const [predictionSavedMatchId, setPredictionSavedMatchId] = useState(null);
   const [predictionLockedMatchIds, setPredictionLockedMatchIds] = useState(() => new Set());
+  const [predictionErrorMatchIds, setPredictionErrorMatchIds] = useState(() => new Set());
   const [selectedMatchId, setSelectedMatchId] = useState(null);
   const [matchEventsById, setMatchEventsById] = useState({});
   const [eventUnavailableMatchIds, setEventUnavailableMatchIds] = useState(() => new Set());
@@ -1736,6 +1776,7 @@ function App() {
   const saveMatchPrediction = (matchId, prediction) => {
     if (!telegramId) {
       setFavoriteMessage(t.unavailable);
+      setPredictionErrorMatchIds((currentIds) => new Set(currentIds).add(matchId));
       return;
     }
 
@@ -1746,6 +1787,11 @@ function App() {
     setPredictionsByMatch((current) => ({ ...current, [matchKey]: prediction }));
     setSavingPredictionMatchId(matchId);
     setPredictionSavedMatchId(null);
+    setPredictionErrorMatchIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+      nextIds.delete(matchId);
+      return nextIds;
+    });
     fetch(`${API_BASE_URL}/prediction`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1771,6 +1817,11 @@ function App() {
           ),
         }));
         setPredictionSavedMatchId(matchId);
+        setPredictionErrorMatchIds((currentIds) => {
+          const nextIds = new Set(currentIds);
+          nextIds.delete(matchId);
+          return nextIds;
+        });
         return fetch(`${API_BASE_URL}/prediction-stats/${telegramId}`);
       })
       .then((response) => {
@@ -1792,6 +1843,7 @@ function App() {
             else delete next[matchKey];
             return next;
           });
+          setPredictionErrorMatchIds((currentIds) => new Set(currentIds).add(matchId));
         }
         console.error("Failed to save prediction:", error);
       })
@@ -1912,6 +1964,7 @@ function App() {
         onPredictionSelect={saveMatchPrediction}
         isPredictionSaving={savingPredictionMatchId === match.id}
         predictionWasSaved={predictionSavedMatchId === match.id}
+        predictionSaveFailed={predictionErrorMatchIds.has(match.id)}
         predictionForceLocked={predictionLockedMatchIds.has(match.id)}
         {...options}
       />

@@ -4,6 +4,7 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from services.worldcup_adapter import repair_text
 
 from db_service import (
     get_all_favorite_teams_from_db,
@@ -192,15 +193,15 @@ def provider_status_values(match):
     raw_status = raw_provider_status(match)
     raw_values = {
         normalized_status(match),
-        str(match.get("status_title") or "").strip().lower(),
-        str(match.get("statusTitle") or "").strip().lower(),
-        str(match.get("time_elapsed") or "").strip().lower(),
-        str(match.get("match_status") or "").strip().lower(),
-        str(match.get("live_badge") or "").strip().lower(),
-        str(match.get("raw_live_badge") or "").strip().lower(),
-        str(raw_status.get("status") or "").strip().lower(),
-        str(raw_status.get("statusTitle") or "").strip().lower(),
-        str(raw_status.get("status_title") or "").strip().lower(),
+        str(repair_text(match.get("status_title")) or "").strip().lower(),
+        str(repair_text(match.get("statusTitle")) or "").strip().lower(),
+        str(repair_text(match.get("time_elapsed")) or "").strip().lower(),
+        str(repair_text(match.get("match_status")) or "").strip().lower(),
+        str(repair_text(match.get("live_badge")) or "").strip().lower(),
+        str(repair_text(match.get("raw_live_badge")) or "").strip().lower(),
+        str(repair_text(raw_status.get("status")) or "").strip().lower(),
+        str(repair_text(raw_status.get("statusTitle")) or "").strip().lower(),
+        str(repair_text(raw_status.get("status_title")) or "").strip().lower(),
     }
     values = {value for value in raw_values if value}
     values.update(value.replace("-", "_").replace(" ", "_") for value in tuple(values))
@@ -245,6 +246,8 @@ def provider_status_is_live(match):
         "halftime",
         "extra time break",
         "penalty shootout",
+        "interval",
+        "\u067e\u0627\u06cc\u0627\u0646 \u0646\u06cc\u0645\u0647",
         "پایان نیمه اول",
         "بین دو نیمه",
         "استراحت بین دو نیمه",
@@ -317,7 +320,7 @@ def is_active_or_transitional(match):
         return True
 
     title_text = " ".join(
-        str(value or "").strip().lower()
+        str(repair_text(value) or "").strip().lower()
         for value in (
             match.get("status_title"),
             match.get("live_badge"),
@@ -334,6 +337,8 @@ def is_active_or_transitional(match):
         "extra time",
         "penalty shootout",
         "penalties",
+        "interval",
+        "\u067e\u0627\u06cc\u0627\u0646 \u0646\u06cc\u0645\u0647",
         "پایان نیمه اول",
         "بین دو نیمه",
         "استراحت بین دو نیمه",
@@ -358,7 +363,7 @@ def is_definitely_finished(match):
         return True
 
     title_text = " ".join(
-        str(value or "").strip()
+        str(repair_text(value) or "").strip()
         for value in (
             match.get("status_title"),
             raw_provider_status(match).get("statusTitle"),

@@ -2640,6 +2640,26 @@ h1 {
   opacity: 1;
 }
 
+.prediction-selection,
+.prediction-error {
+  margin: 0;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.055);
+  color: var(--theme-muted);
+  font-size: 11px;
+  line-height: 1.55;
+  text-align: center;
+}
+
+.prediction-selection strong {
+  color: var(--theme-accent-soft);
+  font-weight: 700;
+}
+
+.prediction-error {
+  color: #ffaaaa;
+}
+
 .hero-match-card .prediction-panel {
   border-color: rgba(var(--theme-accent-rgb), 0.12);
   background: rgba(2, 8, 15, 0.4);

@@ -228,6 +228,13 @@ def canonical_prediction_result(match):
     if penalty_winner in {"home", "away"}:
         return penalty_winner
 
+    score_source = str(match.get("score_source") or "").strip().lower()
+    trusted_score_sources = {
+        "raw_final", "raw_score", "events", "scorers", "worldcup_wrapper", "varzesh3", "score_override",
+    }
+    if score_source not in trusted_score_sources:
+        return None
+
     score = match.get("score") if isinstance(match.get("score"), dict) else {}
     home_score = match.get("home_score")
     away_score = match.get("away_score")
