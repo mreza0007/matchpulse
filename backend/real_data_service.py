@@ -78,6 +78,8 @@ def apply_score_override(item, override):
         item["is_live"] = False
         item["is_upcoming"] = False
         item["live_badge"] = False
+        for key in ("live_phase", "live_phase_fa", "live_phase_en", "live_display_fa", "live_display_en"):
+            item[key] = ""
 
     return item
 
@@ -104,12 +106,16 @@ def get_real_matches(status="all"):
             item["is_live"] = False
             item["is_upcoming"] = False
             item["live_badge"] = False
+            for key in ("live_phase", "live_phase_fa", "live_phase_en", "live_display_fa", "live_display_en"):
+                item[key] = ""
         else:
             item["status"] = normalized_status(status_info["status"])
             item["is_finished"] = status_info["is_finished"]
             item["is_live"] = status_info["is_live"]
             item["is_upcoming"] = status_info["is_upcoming"]
             item["live_badge"] = status_info.get("live_badge") or ("LIVE" if item["status"] == "live" else "")
+            for key in ("live_phase", "live_phase_fa", "live_phase_en", "live_display_fa", "live_display_en"):
+                item[key] = status_info.get(key) or ""
 
         if override:
             item = apply_score_override(item, override)

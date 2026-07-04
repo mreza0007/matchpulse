@@ -1042,7 +1042,138 @@ def live_minute_badge(value):
     return f"{minute}'"
 
 
+LIVE_PHASE_LABELS = {
+    "first_half": ("\u0646\u06cc\u0645\u0647 \u0627\u0648\u0644", "First half"),
+    "half_time": ("\u0628\u06cc\u0646 \u062f\u0648 \u0646\u06cc\u0645\u0647", "Half-time"),
+    "second_half": ("\u0646\u06cc\u0645\u0647 \u062f\u0648\u0645", "Second half"),
+    "extra_time_first_half": ("\u0648\u0642\u062a \u0627\u0636\u0627\u0641\u0647 \u0627\u0648\u0644", "Extra time first half"),
+    "extra_time_break": ("\u0628\u06cc\u0646 \u062f\u0648 \u0648\u0642\u062a \u0627\u0636\u0627\u0641\u0647", "Extra-time break"),
+    "extra_time_second_half": ("\u0648\u0642\u062a \u0627\u0636\u0627\u0641\u0647 \u062f\u0648\u0645", "Extra time second half"),
+    "penalty_shootout": ("\u0636\u0631\u0628\u0627\u062a \u067e\u0646\u0627\u0644\u062a\u06cc", "Penalty shootout"),
+}
+
+
+def derive_live_phase(match):
+    raw_provider_status = match.get("raw_provider_status")
+    raw_provider_status = raw_provider_status if isinstance(raw_provider_status, dict) else {}
+    values = (
+        match.get("status"),
+        match.get("raw_live_badge"),
+        match.get("live_badge"),
+        match.get("time_elapsed"),
+        match.get("raw_minute"),
+        match.get("minute"),
+        match.get("status_title"),
+        match.get("statusTitle"),
+        match.get("match_status"),
+        raw_provider_status.get("status"),
+        raw_provider_status.get("statusTitle"),
+        raw_provider_status.get("status_title"),
+    )
+    normalized_values = {
+        normalize_status_text(value) for value in values if value not in (None, "")
+    }
+    combined_text = " ".join(
+        str(repair_text(value) or "").strip().lower() for value in values if value not in (None, "")
+    )
+
+    penalty_markers = {"penalty", "penalties", "penalty_shootout", "shootout"}
+    extra_break_markers = {"extra_time_break", "extra_time_halftime"}
+    half_time_markers = {"ht", "half_time", "halftime"}
+
+    if normalized_values.intersection(penalty_markers) or "penalty shootout" in combined_text or "\u0636\u0631\u0628\u0627\u062a \u067e\u0646\u0627\u0644\u062a\u06cc" in combined_text:
+        phase = "penalty_shootout"
+    elif (
+        normalized_values.intersection(extra_break_markers)
+        or "extra time break" in combined_text
+        or "\u0627\u0633\u062a\u0631\u0627\u062d\u062a \u0648\u0642\u062a \u0627\u0636\u0627\u0641\u0647" in combined_text
+    ):
+        phase = "extra_time_break"
+    elif (
+        normalized_values.intersection(half_time_markers)
+        or "half time" in combined_text
+        or "half-time" in combined_text
+        or "\u067e\u0627\u06cc\u0627\u0646 \u0646\u06cc\u0645\u0647 \u0627\u0648\u0644" in combined_text
+        or "\u0628\u06cc\u0646 \u062f\u0648 \u0646\u06cc\u0645\u0647" in combined_text
+        or "\u0627\u0633\u062a\u0631\u0627\u062d\u062a \u0628\u06cc\u0646 \u062f\u0648 \u0646\u06cc\u0645\u0647" in combined_text
+    ):
+        phase = "half_time"
+    else:
+        minute_token = ""
+        minute_values = (
+            match.get("raw_live_badge"),
+            match.get("live_badge"),
+            match.get("time_elapsed"),
+            match.get("raw_minute"),
+            match.get("minute"),
+            match.get("status_title"),
+            match.get("statusTitle"),
+            raw_provider_status.get("statusTitle"),
+            raw_provider_status.get("status_title"),
+        )
+        for value in minute_values:
+            text = normalize_digits(repair_text(value) or "")
+            minute_match = re.search(r"(?<!\d)(\d{1,3}(?:\s*\+\s*\d{1,2})?)(?!\d)", text)
+            if minute_match:
+                minute_token = re.sub(r"\s+", "", minute_match.group(1))
+                break
+
+        base_minute = coerce_int(minute_token.split("+", 1)[0]) if minute_token else None
+        explicit_phases = (
+            ("extra_time_first_half", "extra_time_first_half"),
+            ("extra_time_second_half", "extra_time_second_half"),
+            ("1h", "first_half"),
+            ("2h", "second_half"),
+            ("first_half", "first_half"),
+            ("second_half", "second_half"),
+        )
+        phase = next(
+            (phase_name for marker, phase_name in explicit_phases if marker in normalized_values),
+            "",
+        )
+        if not phase and base_minute is not None:
+            if 1 <= base_minute <= 45:
+                phase = "first_half"
+            elif 46 <= base_minute <= 90:
+                phase = "second_half"
+            elif 91 <= base_minute <= 105:
+                phase = "extra_time_first_half"
+            elif base_minute >= 106:
+                phase = "extra_time_second_half"
+
+        if not phase:
+            return {
+                "live_phase": "",
+                "live_phase_fa": "",
+                "live_phase_en": "",
+                "live_display_fa": "",
+                "live_display_en": "",
+            }
+
+        label_fa, label_en = LIVE_PHASE_LABELS[phase]
+        return {
+            "live_phase": phase,
+            "live_phase_fa": label_fa,
+            "live_phase_en": label_en,
+            "live_display_fa": f"{label_fa} - {minute_token}'" if minute_token else label_fa,
+            "live_display_en": f"{label_en} - {minute_token}'" if minute_token else label_en,
+        }
+
+    label_fa, label_en = LIVE_PHASE_LABELS[phase]
+    return {
+        "live_phase": phase,
+        "live_phase_fa": label_fa,
+        "live_phase_en": label_en,
+        "live_display_fa": label_fa,
+        "live_display_en": label_en,
+    }
+
+
 def best_live_badge(match, active_break_label=""):
+    phase_info = derive_live_phase(match)
+    if phase_info["live_display_fa"]:
+        return phase_info["live_display_fa"]
+
     if active_break_label:
         return active_break_label
 
@@ -1199,6 +1330,7 @@ def attach_visibility_flags(match):
 
 
 def normalize_match_status(match):
+    phase_info = derive_live_phase(match)
     raw_provider_status = match.get("raw_provider_status")
     raw_provider_status = raw_provider_status if isinstance(raw_provider_status, dict) else {}
     raw_status_value = None
@@ -1280,6 +1412,7 @@ def normalize_match_status(match):
             "is_live": True,
             "is_upcoming": False,
             "live_badge": best_live_badge(match, active_break_label),
+            **phase_info,
         }
 
     if (
@@ -1303,6 +1436,7 @@ def normalize_match_status(match):
             "is_live": False,
             "is_upcoming": False,
             "live_badge": "",
+            **phase_info,
         }
 
     if (
@@ -1316,6 +1450,7 @@ def normalize_match_status(match):
             "is_live": True,
             "is_upcoming": False,
             "live_badge": best_live_badge(match),
+            **phase_info,
         }
 
     if (
@@ -1330,6 +1465,7 @@ def normalize_match_status(match):
             "is_live": False,
             "is_upcoming": False,
             "live_badge": "",
+            **phase_info,
         }
 
     return {
@@ -1338,6 +1474,7 @@ def normalize_match_status(match):
         "is_live": False,
         "is_upcoming": True,
         "live_badge": "",
+        **phase_info,
     }
 
 
@@ -1960,6 +2097,11 @@ def normalize_match(match):
         "is_live": status_info["is_live"],
         "is_upcoming": status_info["is_upcoming"],
         "live_badge": status_info.get("live_badge") or ("LIVE" if status == "live" else ""),
+        "live_phase": status_info.get("live_phase") or "",
+        "live_phase_fa": status_info.get("live_phase_fa") or "",
+        "live_phase_en": status_info.get("live_phase_en") or "",
+        "live_display_fa": status_info.get("live_display_fa") or "",
+        "live_display_en": status_info.get("live_display_en") or "",
         "raw_live_badge": match.get("raw_live_badge") or match.get("live_badge"),
         "events": normalize_events(match.get("events") or []),
         "score_source": normalized_score_source,

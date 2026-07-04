@@ -372,7 +372,13 @@ function formatCountdown(milliseconds, lang) {
   );
 }
 
-function getLiveDisplayBadge(match, t) {
+function getLiveDisplayBadge(match, lang, t) {
+  const normalizedDisplay = lang === "en"
+    ? match?.live_display_en || match?.live_display
+    : match?.live_display_fa || match?.live_display;
+  if (normalizedDisplay) return String(normalizedDisplay).trim();
+  if (match?.live_badge) return String(match.live_badge).trim();
+
   const values = [
     match?.raw_live_badge,
     match?.time_elapsed,
@@ -380,7 +386,6 @@ function getLiveDisplayBadge(match, t) {
     match?.minute,
     match?.status_title,
     match?.statusTitle,
-    match?.live_badge,
   ].filter((value) => value !== null && value !== undefined && String(value).trim());
   const minutePattern = /(?:^|\s)([0-9۰-۹٠-٩]{1,3}(?:\s*\+\s*[0-9۰-۹٠-٩]{1,2})?)\s*['′’]?(?:$|\s)/;
 
@@ -412,17 +417,17 @@ function getHeroStatusLine(match, heroMode, lang, t, now) {
   }
 
   if (heroMode === "live") {
-    return { label: "", value: getLiveDisplayBadge(match, t), isCountdown: false };
+    return { label: "", value: getLiveDisplayBadge(match, lang, t), isCountdown: false };
   }
 
   return { label: "", value: t.matchFinished, isCountdown: false };
 }
 
-function getMatchStatus(match, t) {
+function getMatchStatus(match, lang, t) {
   const normalizedStatus = normalizeMatchStatus(match);
 
   if (normalizedStatus === "live") {
-    return { key: "live", label: getLiveDisplayBadge(match, t) };
+    return { key: "live", label: getLiveDisplayBadge(match, lang, t) };
   }
 
   if (normalizedStatus === "finished") {
@@ -925,7 +930,7 @@ function MatchCard({
   predictionSaveFailed = false,
   predictionForceLocked = false,
 }) {
-  const matchStatus = getMatchStatus(match, t);
+  const matchStatus = getMatchStatus(match, lang, t);
   const isLive = isLiveMatch(match);
   const matchScoreValue = getMatchScore(match);
   const matchScore =
@@ -1121,7 +1126,7 @@ function HeroMatchCard({ label, mode, match, lang, t, children }) {
 function BracketMatchCard({ match, lang, t }) {
   if (!match) return <div className="bracket-match bracket-match-empty" aria-hidden="true" />;
 
-  const status = getMatchStatus(match, t);
+  const status = getMatchStatus(match, lang, t);
   const score = getMatchScore(match);
   const showScore = ["live", "finished"].includes(status.key);
   const homeName = getLocalizedTeamName(match, "home", lang) || match.home_team_label || t.unavailable;
