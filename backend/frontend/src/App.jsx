@@ -1342,6 +1342,7 @@ function App() {
   const [scoreChangedMatchIds, setScoreChangedMatchIds] = useState(() => new Set());
   const scoreChangeTimeouts = useRef(new Map());
   const predictionMutationVersion = useRef(0);
+  const predictionSaveRequests = useRef(new Map());
 
   const t = translations[lang];
   const telegramId = telegramUser?.id;
@@ -1820,24 +1821,29 @@ function App() {
   };
 
   const saveMatchPrediction = (matchId, prediction) => {
+    const matchKey = String(matchId);
+
     if (!telegramId) {
       setFavoriteMessage(t.unavailable);
-      setPredictionErrorMatchIds((currentIds) => new Set(currentIds).add(matchId));
+      setPredictionErrorMatchIds((currentIds) => new Set(currentIds).add(matchKey));
       return;
     }
 
-    const matchKey = String(matchId);
     const previousPrediction = predictionsByMatch[matchKey] || "";
-    let predictionSaved = false;
-    predictionMutationVersion.current += 1;
+    const requestVersion = predictionMutationVersion.current + 1;
+    predictionMutationVersion.current = requestVersion;
+    predictionSaveRequests.current.set(matchKey, requestVersion);
+    const isCurrentSave = () => predictionSaveRequests.current.get(matchKey) === requestVersion;
+
     setPredictionsByMatch((current) => ({ ...current, [matchKey]: prediction }));
-    setSavingPredictionMatchId(matchId);
+    setSavingPredictionMatchId(matchKey);
     setPredictionSavedMatchId(null);
     setPredictionErrorMatchIds((currentIds) => {
       const nextIds = new Set(currentIds);
-      nextIds.delete(matchId);
+      nextIds.delete(matchKey);
       return nextIds;
     });
+
     fetch(`${API_BASE_URL}/prediction`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1846,15 +1852,17 @@ function App() {
       .then(async (response) => {
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
+          if (!isCurrentSave()) return null;
           if (response.status === 409) {
-            setPredictionLockedMatchIds((currentIds) => new Set(currentIds).add(matchId));
+            setPredictionLockedMatchIds((currentIds) => new Set(currentIds).add(matchKey));
           }
           throw new Error(data.detail || `Prediction request failed: ${response.status}`);
         }
         return data;
       })
       .then((data) => {
-        predictionSaved = true;
+        if (!data || !isCurrentSave()) return;
+
         const predictions = Array.isArray(data.predictions) ? data.predictions : [];
         setPredictionsByMatch((current) => ({
           ...current,
@@ -1862,38 +1870,47 @@ function App() {
             predictions.map((item) => [String(item.match_id), item.prediction]),
           ),
         }));
-        setPredictionSavedMatchId(matchId);
+        setPredictionSavedMatchId(matchKey);
         setPredictionErrorMatchIds((currentIds) => {
           const nextIds = new Set(currentIds);
-          nextIds.delete(matchId);
+          nextIds.delete(matchKey);
           return nextIds;
         });
-        return fetch(`${API_BASE_URL}/prediction-stats/${telegramId}`);
-      })
-      .then((response) => {
-        if (!response.ok) throw new Error(`Prediction stats request failed: ${response.status}`);
-        return response.json();
-      })
-      .then((data) => setPredictionStats({
-        points: Number(data.points) || 0,
-        correct: Number(data.correct) || 0,
-        wrong: Number(data.wrong) || 0,
-        pending: Number(data.pending) || 0,
-        total: Number(data.total) || 0,
-      }))
-      .catch((error) => {
-        if (!predictionSaved) {
-          setPredictionsByMatch((current) => {
-            const next = { ...current };
-            if (previousPrediction) next[matchKey] = previousPrediction;
-            else delete next[matchKey];
-            return next;
+
+        fetch(`${API_BASE_URL}/prediction-stats/${telegramId}`)
+          .then((response) => {
+            if (!response.ok) throw new Error(`Prediction stats request failed: ${response.status}`);
+            return response.json();
+          })
+          .then((statsData) => {
+            if (!isCurrentSave()) return;
+            setPredictionStats({
+              points: Number(statsData.points) || 0,
+              correct: Number(statsData.correct) || 0,
+              wrong: Number(statsData.wrong) || 0,
+              pending: Number(statsData.pending) || 0,
+              total: Number(statsData.total) || 0,
+            });
+          })
+          .catch((error) => {
+            console.warn("Prediction was saved, but stats refresh failed:", error);
           });
-          setPredictionErrorMatchIds((currentIds) => new Set(currentIds).add(matchId));
-        }
+      })
+      .catch((error) => {
+        if (!isCurrentSave()) return;
+
+        setPredictionsByMatch((current) => {
+          const next = { ...current };
+          if (previousPrediction) next[matchKey] = previousPrediction;
+          else delete next[matchKey];
+          return next;
+        });
+        setPredictionErrorMatchIds((currentIds) => new Set(currentIds).add(matchKey));
         console.error("Failed to save prediction:", error);
       })
-      .finally(() => setSavingPredictionMatchId(null));
+      .finally(() => {
+        if (isCurrentSave()) setSavingPredictionMatchId(null);
+      });
   };
 
   const handleMatchDetailsClick = (match) => {
@@ -1985,6 +2002,7 @@ function App() {
 
   const renderMatchCard = (match, options = {}) => {
     const { homeTeam, awayTeam } = getMatchTeams(match);
+    const matchKey = String(match.id);
 
     return (
       <MatchCard
@@ -2006,12 +2024,12 @@ function App() {
         eventsUnavailable={eventUnavailableMatchIds.has(match.id)}
         eventsFailed={eventFailedMatchIds.has(match.id)}
         isScoreChanged={scoreChangedMatchIds.has(match.id)}
-        prediction={predictionsByMatch[String(match.id)] || ""}
+        prediction={predictionsByMatch[matchKey] || ""}
         onPredictionSelect={saveMatchPrediction}
-        isPredictionSaving={savingPredictionMatchId === match.id}
-        predictionWasSaved={predictionSavedMatchId === match.id}
-        predictionSaveFailed={predictionErrorMatchIds.has(match.id)}
-        predictionForceLocked={predictionLockedMatchIds.has(match.id)}
+        isPredictionSaving={savingPredictionMatchId === matchKey}
+        predictionWasSaved={predictionSavedMatchId === matchKey}
+        predictionSaveFailed={predictionErrorMatchIds.has(matchKey)}
+        predictionForceLocked={predictionLockedMatchIds.has(matchKey)}
         {...options}
       />
     );
