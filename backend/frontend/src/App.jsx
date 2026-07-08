@@ -372,7 +372,37 @@ function formatCountdown(milliseconds, lang) {
   );
 }
 
+function hasPenaltyScores(match) {
+  return match?.home_penalty_score != null && match?.away_penalty_score != null;
+}
+
+function getPenaltyShootoutLabel(lang) {
+  return lang === "fa" ? "ضربات پنالتی" : "Penalty shootout";
+}
+
+function isLivePenaltyShootout(match) {
+  if (!match || isFinishedMatch(match) || !isLiveMatch(match) || !hasPenaltyScores(match)) return false;
+
+  const text = [
+    match.live_phase,
+    match.live_badge,
+    match.raw_live_badge,
+    match.status_title,
+    match.statusTitle,
+    match.raw_provider_status?.statusTitle,
+    match.raw_provider_status?.status_title,
+  ].filter(Boolean).join(" ").toLowerCase();
+
+  return text.includes("penalty_shootout") ||
+    text.includes("penalty shootout") ||
+    text.includes("penalties") ||
+    text.includes("ضربات پنالتی") ||
+    hasPenaltyScores(match);
+}
+
 function getLiveDisplayBadge(match, lang, t) {
+  if (isLivePenaltyShootout(match)) return getPenaltyShootoutLabel(lang);
+
   const normalizedDisplay = lang === "en"
     ? match?.live_display_en || match?.live_display
     : match?.live_display_fa || match?.live_display;
@@ -853,6 +883,17 @@ function toPersianDigits(value) {
 }
 
 function getPenaltySummary(match, lang) {
+  if (isLivePenaltyShootout(match)) {
+    const homeName = getLocalizedTeamName(match, "home", lang) || match?.home_team_label || (lang === "fa" ? "میزبان" : "Home");
+    const awayName = getLocalizedTeamName(match, "away", lang) || match?.away_team_label || (lang === "fa" ? "مهمان" : "Away");
+    const homePenalty = lang === "fa" ? toPersianDigits(match.home_penalty_score) : match.home_penalty_score;
+    const awayPenalty = lang === "fa" ? toPersianDigits(match.away_penalty_score) : match.away_penalty_score;
+
+    return lang === "fa"
+      ? `ضربات پنالتی در جریان: ${homeName} ${homePenalty} - ${awayPenalty} ${awayName}`
+      : `Penalty shootout in progress: ${homeName} ${homePenalty} - ${awayPenalty} ${awayName}`;
+  }
+
   const providedSummary = lang === "fa" ? match?.penalty_summary_fa : match?.penalty_summary_en;
   if (providedSummary) return providedSummary;
 
