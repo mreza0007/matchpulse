@@ -1253,9 +1253,9 @@ function KnockoutBracket({ matches, lang, t }) {
       <div className="bracket-scroll bracket-scroll-area" dir="ltr">
         <div className="bracket-stage" style={stageStyle}>
           <div className="bracket-board">
-            <BracketColumn ids={[74, 77, 73, 75, 76, 78, 79, 80]} matchesById={matchesById} round="r32" title={t.roundOf32} side="left" lang={lang} t={t} />
-            <BracketColumn ids={[89, 90, 91, 92]} matchesById={matchesById} round="r16" title={t.roundOf16} side="left" lang={lang} t={t} />
-            <BracketColumn ids={[97, 99]} matchesById={matchesById} round="qf" title={t.quarterfinals} side="left" lang={lang} t={t} />
+            <BracketColumn ids={[74, 77, 73, 75, 83, 84, 81, 82]} matchesById={matchesById} round="r32" title={t.roundOf32} side="left" lang={lang} t={t} />
+            <BracketColumn ids={[89, 90, 93, 94]} matchesById={matchesById} round="r16" title={t.roundOf16} side="left" lang={lang} t={t} />
+            <BracketColumn ids={[97, 98]} matchesById={matchesById} round="qf" title={t.quarterfinals} side="left" lang={lang} t={t} />
             <BracketColumn ids={[101]} matchesById={matchesById} round="sf" title={t.semifinals} side="left" lang={lang} t={t} />
 
             <section className="bracket-center" dir={t.dir}>
@@ -1271,9 +1271,9 @@ function KnockoutBracket({ matches, lang, t }) {
             </section>
 
             <BracketColumn ids={[102]} matchesById={matchesById} round="sf" title={t.semifinals} side="right" lang={lang} t={t} />
-            <BracketColumn ids={[98, 100]} matchesById={matchesById} round="qf" title={t.quarterfinals} side="right" lang={lang} t={t} />
-            <BracketColumn ids={[93, 94, 95, 96]} matchesById={matchesById} round="r16" title={t.roundOf16} side="right" lang={lang} t={t} />
-            <BracketColumn ids={[83, 84, 81, 82, 86, 88, 85, 87]} matchesById={matchesById} round="r32" title={t.roundOf32} side="right" lang={lang} t={t} />
+            <BracketColumn ids={[99, 100]} matchesById={matchesById} round="qf" title={t.quarterfinals} side="right" lang={lang} t={t} />
+            <BracketColumn ids={[91, 92, 95, 96]} matchesById={matchesById} round="r16" title={t.roundOf16} side="right" lang={lang} t={t} />
+            <BracketColumn ids={[76, 78, 79, 80, 86, 88, 85, 87]} matchesById={matchesById} round="r32" title={t.roundOf32} side="right" lang={lang} t={t} />
           </div>
         </div>
       </div>
