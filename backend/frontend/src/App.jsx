@@ -1253,8 +1253,8 @@ function KnockoutBracket({ matches, lang, t }) {
       <div className="bracket-scroll bracket-scroll-area" dir="ltr">
         <div className="bracket-stage" style={stageStyle}>
           <div className="bracket-board">
-            <BracketColumn ids={[73, 75, 74, 77, 76, 78, 79, 80]} matchesById={matchesById} round="r32" title={t.roundOf32} side="left" lang={lang} t={t} />
-            <BracketColumn ids={[90, 89, 91, 92]} matchesById={matchesById} round="r16" title={t.roundOf16} side="left" lang={lang} t={t} />
+            <BracketColumn ids={[74, 77, 73, 75, 76, 78, 79, 80]} matchesById={matchesById} round="r32" title={t.roundOf32} side="left" lang={lang} t={t} />
+            <BracketColumn ids={[89, 90, 91, 92]} matchesById={matchesById} round="r16" title={t.roundOf16} side="left" lang={lang} t={t} />
             <BracketColumn ids={[97, 99]} matchesById={matchesById} round="qf" title={t.quarterfinals} side="left" lang={lang} t={t} />
             <BracketColumn ids={[101]} matchesById={matchesById} round="sf" title={t.semifinals} side="left" lang={lang} t={t} />
 
