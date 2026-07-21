@@ -540,6 +540,25 @@ const translations = {
     noUpcomingMatches: "فعلاً بازی پیش‌رویی پیدا نشد",
     noPastMatches: "هنوز نتیجه‌ای ثبت نشده است",
     noNews: "فعلاً خبری برای نمایش نیست",
+    worldcupArchiveTab: "جام ۲۰۲۶",
+    worldcupArchiveTitle: "جام جهانی ۲۰۲۶",
+    worldcupArchiveSubtitle: "خلاصه و افتخارات جام",
+    worldcupArchiveLoading: "در حال دریافت خلاصه جام...",
+    worldcupArchiveError: "خلاصه جام فعلاً در دسترس نیست.",
+    championTitle: "قهرمان جام جهانی ۲۰۲۶",
+    runnerUp: "نایب‌قهرمان",
+    thirdPlaceHonor: "مقام سوم",
+    fourthPlaceHonor: "مقام چهارم",
+    awardsTitle: "افتخارات فردی",
+    finalMatchesTitle: "بازی‌های پایانی",
+    highlightsTitle: "لحظه‌های شاخص",
+    highestScoringMatch: "پرگل‌ترین بازی",
+    biggestWins: "بزرگ‌ترین بردها",
+    finalMatchLabel: "فینال",
+    thirdPlaceMatchLabel: "رده‌بندی",
+    goalsLabel: "گل",
+    assistsLabel: "پاس گل",
+    goalDiffLabel: "اختلاف گل",
     matchesError: "دریافت بازی‌ها ناموفق بود. دوباره تلاش کن.",
     unavailable: "نامشخص",
     home: "خانه",
@@ -648,6 +667,25 @@ const translations = {
     noUpcomingMatches: "No future matches were found.",
     noPastMatches: "No results are available yet.",
     noNews: "No news to show yet.",
+    worldcupArchiveTab: "WC 2026",
+    worldcupArchiveTitle: "World Cup 2026",
+    worldcupArchiveSubtitle: "Tournament summary and honors",
+    worldcupArchiveLoading: "Loading tournament summary...",
+    worldcupArchiveError: "The tournament summary is temporarily unavailable.",
+    championTitle: "World Cup 2026 Champion",
+    runnerUp: "Runner-up",
+    thirdPlaceHonor: "Third place",
+    fourthPlaceHonor: "Fourth place",
+    awardsTitle: "Individual Honors",
+    finalMatchesTitle: "Final Matches",
+    highlightsTitle: "Tournament Highlights",
+    highestScoringMatch: "Highest scoring match",
+    biggestWins: "Biggest wins",
+    finalMatchLabel: "Final",
+    thirdPlaceMatchLabel: "Third-place match",
+    goalsLabel: "goals",
+    assistsLabel: "assists",
+    goalDiffLabel: "Goal diff",
     matchesError: "Could not load matches. Please try again.",
     unavailable: "Unavailable",
     home: "Home",
@@ -940,6 +978,213 @@ function PenaltySummary({ match, lang, compact = false }) {
   return (
     <div className={compact ? "bracket-penalty-summary" : "penalty-summary"}>
       {summary}
+    </div>
+  );
+}
+
+function SummaryFlag({ team }) {
+  const flagUrl = team?.flag_url || (typeof team?.flag === "string" && team.flag.startsWith("http") ? team.flag : "");
+  const flagEmoji = flagUrl ? "" : team?.flag;
+  const teamName = team?.name_en || team?.team_en || team?.team || "";
+
+  if (flagUrl) {
+    return (
+      <span className="team-flag" aria-hidden="true">
+        <img className="team-flag-img" src={flagUrl} alt="" loading="lazy" />
+      </span>
+    );
+  }
+
+  return <TeamFlag flagEmoji={flagEmoji} teamName={teamName} />;
+}
+
+function summaryName(team, lang) {
+  if (!team) return "";
+  return lang === "fa"
+    ? team.name_fa || team.team_fa || team.home_fa || team.away_fa || team.name_en || team.team_en || team.team || ""
+    : team.name_en || team.team_en || team.home_en || team.away_en || team.name_fa || team.team_fa || team.team || "";
+}
+
+function awardDisplayName(award, lang) {
+  if (!award) return "";
+  return lang === "fa"
+    ? award.name_fa || award.name || award.name_en || ""
+    : award.name_en || award.name || award.name_fa || "";
+}
+
+function summaryMatchTeams(match) {
+  if (!match) return { home: null, away: null };
+  return {
+    home: {
+      name_fa: match.home_fa,
+      name_en: match.home_en,
+      flag: match.home_flag,
+      flag_url: match.home_flag_url,
+    },
+    away: {
+      name_fa: match.away_fa,
+      name_en: match.away_en,
+      flag: match.away_flag,
+      flag_url: match.away_flag_url,
+    },
+  };
+}
+
+function SummaryMatchCard({ title, match, lang, t, highlight = "" }) {
+  if (!match) return null;
+
+  const teams = summaryMatchTeams(match);
+  const score = match.score || {};
+  const scoreText = `${score.home ?? match.home_score ?? 0} - ${score.away ?? match.away_score ?? 0}`;
+
+  return (
+    <article className="archive-match-card">
+      <div className="archive-card-kicker">{title}</div>
+      <div className="archive-match-line">
+        <span>
+          <SummaryFlag team={teams.home} />
+          {summaryName(teams.home, lang)}
+        </span>
+        <strong dir="ltr">{scoreText}</strong>
+        <span>
+          <SummaryFlag team={teams.away} />
+          {summaryName(teams.away, lang)}
+        </span>
+      </div>
+      <PenaltySummary match={match} lang={lang} />
+      {highlight && <small>{highlight}</small>}
+    </article>
+  );
+}
+
+function PodiumCard({ rank, team, label, lang }) {
+  if (!team) return null;
+
+  return (
+    <article className={`podium-card rank-${rank}`}>
+      <span className="podium-rank">{rank}</span>
+      <SummaryFlag team={team} />
+      <div>
+        <small>{label}</small>
+        <strong>{summaryName(team, lang)}</strong>
+      </div>
+    </article>
+  );
+}
+
+function AwardCard({ award, lang, t }) {
+  if (!award) return null;
+
+  const label = lang === "fa" ? award.award_fa : award.award_en;
+  const team = {
+    name_fa: award.team_fa,
+    name_en: award.team_en,
+    flag: award.team_flag,
+    flag_url: award.team_flag_url,
+  };
+  const stat = lang === "fa"
+    ? award.goals_label_fa || award.assists_label_fa || ""
+    : award.goals
+      ? `${award.goals} ${t.goalsLabel}`
+      : award.assists
+        ? `${award.assists} ${t.assistsLabel}`
+        : "";
+  const note = lang === "fa" ? award.note_fa : award.note_en;
+
+  return (
+    <article className="award-card">
+      <div className="archive-card-kicker">{label}</div>
+      <strong>{awardDisplayName(award, lang)}</strong>
+      <span>
+        <SummaryFlag team={team} />
+        {summaryName(team, lang)}
+      </span>
+      {stat && <b>{stat}</b>}
+      {note && <small>{note}</small>}
+    </article>
+  );
+}
+
+function WorldCupArchive({ summary, isLoading, error, lang, t }) {
+  if (isLoading) {
+    return <p className="archive-message">{t.worldcupArchiveLoading}</p>;
+  }
+
+  if (error || !summary || !summary.podium?.champion) {
+    return <p className="archive-message">{t.worldcupArchiveError}</p>;
+  }
+
+  const podium = summary.podium || {};
+  const awards = summary.awards || {};
+  const highlights = summary.highlights || {};
+  const champion = podium.champion;
+
+  return (
+    <div className="archive-page">
+      <article className="archive-hero-card">
+        <div className="archive-hero-mark" aria-hidden="true">2026</div>
+        <div>
+          <p className="eyebrow">{lang === "fa" ? summary.subtitle_fa : summary.subtitle_en}</p>
+          <h2>{summaryName(champion, lang)}</h2>
+          <span>{t.championTitle}</span>
+        </div>
+        <SummaryFlag team={champion} />
+        <SummaryMatchCard title={t.finalMatchLabel} match={summary.final_match} lang={lang} t={t} />
+      </article>
+
+      <section className="archive-grid podium-grid">
+        <PodiumCard rank="2" team={podium.runner_up} label={t.runnerUp} lang={lang} />
+        <PodiumCard rank="3" team={podium.third_place} label={t.thirdPlaceHonor} lang={lang} />
+        <PodiumCard rank="4" team={podium.fourth_place} label={t.fourthPlaceHonor} lang={lang} />
+      </section>
+
+      <section className="archive-block">
+        <div className="section-header">
+          <h2>{t.awardsTitle}</h2>
+        </div>
+        <div className="archive-grid awards-grid">
+          <AwardCard award={awards.best_player} lang={lang} t={t} />
+          <AwardCard award={awards.top_scorer} lang={lang} t={t} />
+          <AwardCard award={awards.top_assister} lang={lang} t={t} />
+          <AwardCard award={awards.best_goalkeeper} lang={lang} t={t} />
+          <AwardCard award={awards.best_young_player} lang={lang} t={t} />
+        </div>
+      </section>
+
+      <section className="archive-block">
+        <div className="section-header">
+          <h2>{t.finalMatchesTitle}</h2>
+        </div>
+        <div className="archive-grid">
+          <SummaryMatchCard title={t.finalMatchLabel} match={summary.final_match} lang={lang} t={t} />
+          <SummaryMatchCard title={t.thirdPlaceMatchLabel} match={summary.third_place_match} lang={lang} t={t} />
+        </div>
+      </section>
+
+      <section className="archive-block">
+        <div className="section-header">
+          <h2>{t.highlightsTitle}</h2>
+        </div>
+        <div className="archive-grid">
+          <SummaryMatchCard
+            title={t.highestScoringMatch}
+            match={highlights.highest_scoring_match}
+            lang={lang}
+            t={t}
+            highlight={highlights.highest_scoring_match?.total_goals ? `${highlights.highest_scoring_match.total_goals} ${t.goalsLabel}` : ""}
+          />
+          {(highlights.biggest_wins || []).map((match) => (
+            <SummaryMatchCard
+              key={match.id}
+              title={t.biggestWins}
+              match={match}
+              lang={lang}
+              t={t}
+              highlight={match.goal_diff ? `${t.goalDiffLabel}: ${match.goal_diff}` : ""}
+            />
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
@@ -1323,6 +1568,9 @@ function App() {
   const [matchesError, setMatchesError] = useState("");
   const [currentTime, setCurrentTime] = useState(0);
   const [newsItems] = useState([]);
+  const [worldcupSummary, setWorldcupSummary] = useState(null);
+  const [isLoadingWorldcupSummary, setIsLoadingWorldcupSummary] = useState(true);
+  const [worldcupSummaryError, setWorldcupSummaryError] = useState("");
   const [teams, setTeams] = useState([]);
   const [favoriteTeams, setFavoriteTeams] = useState([]);
   const [favoriteMessage, setFavoriteMessage] = useState("");
@@ -1484,6 +1732,26 @@ function App() {
       console.warn("Telegram WebApp initialization was not fully available:", error);
     }
   }, []);
+
+  useEffect(() => {
+    setIsLoadingWorldcupSummary(true);
+    setWorldcupSummaryError("");
+
+    fetch(`${API_BASE_URL}/worldcup/summary`)
+      .then((response) => {
+        if (!response.ok) throw new Error(`World Cup summary request failed: ${response.status}`);
+        return response.json();
+      })
+      .then((data) => {
+        setWorldcupSummary(data);
+        setWorldcupSummaryError("");
+      })
+      .catch((error) => {
+        console.error("Failed to load World Cup summary:", error);
+        setWorldcupSummaryError(t.worldcupArchiveError);
+      })
+      .finally(() => setIsLoadingWorldcupSummary(false));
+  }, [t.worldcupArchiveError]);
 
   useEffect(() => {
     const scoreTimeouts = scoreChangeTimeouts.current;
@@ -2219,18 +2487,22 @@ function App() {
         </section>
       )}
 
-      {activeTab === "news" && (
-        <section className="section">
+      {activeTab === "worldcup" && (
+        <section className="section archive-section">
           <div className="section-header">
-            <h2>{t.latestNews}</h2>
+            <div>
+              <p className="eyebrow">{t.worldcupArchiveSubtitle}</p>
+              <h2>{t.worldcupArchiveTitle}</h2>
+            </div>
           </div>
 
-          <div className="news-list">
-            {newsItems.length === 0 && <p>{t.noNews}</p>}
-            {newsItems.map((item) => (
-              <NewsCard key={item.id} item={item} lang={lang} />
-            ))}
-          </div>
+          <WorldCupArchive
+            summary={worldcupSummary}
+            isLoading={isLoadingWorldcupSummary}
+            error={worldcupSummaryError}
+            lang={lang}
+            t={t}
+          />
         </section>
       )}
 
@@ -2433,10 +2705,10 @@ function App() {
         </button>
 
         <button
-          className={activeTab === "news" ? "active" : ""}
-          onClick={() => setActiveTab("news")}
+          className={activeTab === "worldcup" ? "active" : ""}
+          onClick={() => setActiveTab("worldcup")}
         >
-          📰 {t.news}
+          🏆 {t.worldcupArchiveTab}
         </button>
 
         <button

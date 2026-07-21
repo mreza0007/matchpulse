@@ -33,6 +33,257 @@ def get_match_events(match_id):
     return get_match_events_from_worldcup_wrapper(match_id)
 
 
+def match_score(match):
+    score = match.get("score") if isinstance(match.get("score"), dict) else {}
+    home_score = match.get("home_score")
+    away_score = match.get("away_score")
+
+    if home_score is None:
+        home_score = score.get("home")
+
+    if away_score is None:
+        away_score = score.get("away")
+
+    try:
+        home_score = int(home_score)
+        away_score = int(away_score)
+    except (TypeError, ValueError):
+        return None, None
+
+    return home_score, away_score
+
+
+def match_result_side(match):
+    result = str(match.get("penalty_winner_side") or match.get("result") or "").strip().lower()
+    if result in {"home", "away"}:
+        return result
+
+    home_score, away_score = match_score(match)
+    if home_score is None or away_score is None:
+        return ""
+    if home_score > away_score:
+        return "home"
+    if away_score > home_score:
+        return "away"
+    return "draw"
+
+
+def summary_team(match, side):
+    return {
+        "side": side,
+        "name_fa": match.get(f"{side}_fa") or match.get(f"{side}_en") or "",
+        "name_en": match.get(f"{side}_en") or match.get(f"{side}_fa") or "",
+        "flag": match.get(f"{side}_flag") or "",
+        "flag_url": match.get(f"{side}_flag_url") or "",
+    }
+
+
+def other_side(side):
+    return "away" if side == "home" else "home"
+
+
+def summary_match(match):
+    if not match:
+        return None
+
+    home_score, away_score = match_score(match)
+    return {
+        "id": match.get("id"),
+        "home_fa": match.get("home_fa") or match.get("home_en") or "",
+        "home_en": match.get("home_en") or match.get("home_fa") or "",
+        "away_fa": match.get("away_fa") or match.get("away_en") or "",
+        "away_en": match.get("away_en") or match.get("away_fa") or "",
+        "home_flag": match.get("home_flag") or "",
+        "away_flag": match.get("away_flag") or "",
+        "home_flag_url": match.get("home_flag_url") or "",
+        "away_flag_url": match.get("away_flag_url") or "",
+        "score": {
+            "home": home_score,
+            "away": away_score,
+        },
+        "home_score": home_score,
+        "away_score": away_score,
+        "result": match.get("result") or match_result_side(match),
+        "home_penalty_score": match.get("home_penalty_score"),
+        "away_penalty_score": match.get("away_penalty_score"),
+        "penalty_winner_side": match.get("penalty_winner_side"),
+        "penalty_winner_fa": match.get("penalty_winner_fa"),
+        "penalty_winner_en": match.get("penalty_winner_en"),
+        "penalty_summary_fa": match.get("penalty_summary_fa"),
+        "penalty_summary_en": match.get("penalty_summary_en"),
+        "win_method": match.get("win_method"),
+    }
+
+
+def summary_match_with_total(match):
+    item = summary_match(match)
+    if not item:
+        return None
+
+    home_score = item["score"]["home"]
+    away_score = item["score"]["away"]
+    item["total_goals"] = (home_score or 0) + (away_score or 0)
+    return item
+
+
+def summary_match_with_goal_diff(match):
+    item = summary_match(match)
+    if not item:
+        return None
+
+    home_score = item["score"]["home"]
+    away_score = item["score"]["away"]
+    item["goal_diff"] = abs((home_score or 0) - (away_score or 0))
+    return item
+
+
+def team_lookup_from_matches(matches):
+    lookup = {}
+    for match in matches:
+        for side in ("home", "away"):
+            team = summary_team(match, side)
+            for name in (team["name_en"], team["name_fa"]):
+                if name:
+                    lookup.setdefault(name.lower(), team)
+    return lookup
+
+
+def award_item(name, team_name, award_en, award_fa, team_lookup, **extra):
+    team = team_lookup.get(str(team_name or "").lower(), {})
+    return {
+        "name": name,
+        "name_en": name,
+        "name_fa": extra.pop("name_fa", name),
+        "team": team_name,
+        "team_en": team.get("name_en") or team_name,
+        "team_fa": extra.pop("team_fa", None) or team.get("name_fa") or team_name,
+        "team_flag": team.get("flag") or "",
+        "team_flag_url": team.get("flag_url") or "",
+        "award_en": award_en,
+        "award_fa": award_fa,
+        **extra,
+    }
+
+
+def get_worldcup_summary():
+    matches = get_real_matches(status="all")
+    match_by_id = {int(match.get("id")): match for match in matches if str(match.get("id") or "").isdigit()}
+    final_match = match_by_id.get(104)
+    third_place_match = match_by_id.get(103)
+
+    final_winner_side = match_result_side(final_match or {})
+    third_winner_side = match_result_side(third_place_match or {})
+    champion = summary_team(final_match, final_winner_side) if final_winner_side in {"home", "away"} else None
+    runner_up = summary_team(final_match, other_side(final_winner_side)) if final_winner_side in {"home", "away"} else None
+    third_place = summary_team(third_place_match, third_winner_side) if third_winner_side in {"home", "away"} else None
+    fourth_place = summary_team(third_place_match, other_side(third_winner_side)) if third_winner_side in {"home", "away"} else None
+
+    finished_matches = [
+        match for match in matches
+        if match.get("is_finished") is True or match.get("status") == "finished"
+    ]
+    scored_matches = [
+        match for match in finished_matches
+        if match_score(match)[0] is not None and match_score(match)[1] is not None
+    ]
+    highest_scoring_match = max(
+        scored_matches,
+        key=lambda match: sum(match_score(match)),
+        default=None,
+    )
+    max_goal_diff = max(
+        (abs(match_score(match)[0] - match_score(match)[1]) for match in scored_matches),
+        default=0,
+    )
+    biggest_wins = [
+        summary_match_with_goal_diff(match)
+        for match in scored_matches
+        if abs(match_score(match)[0] - match_score(match)[1]) == max_goal_diff and max_goal_diff > 0
+    ]
+
+    team_lookup = team_lookup_from_matches(matches)
+    top_assister_note_en = "Some sources list 7 assists; FIFA top-assisters page snippet lists 5."
+    top_assister_note_fa = "برخی منابع ۷ پاس گل گزارش کرده‌اند؛ داده رسمی‌تر فیفا ۵ پاس گل را نشان می‌دهد."
+
+    return {
+        "competition_key": "worldcup2026",
+        "title_fa": "جام جهانی ۲۰۲۶",
+        "title_en": "World Cup 2026",
+        "subtitle_fa": "خلاصه و افتخارات جام",
+        "subtitle_en": "Tournament summary and honors",
+        "podium": {
+            "champion": champion,
+            "runner_up": runner_up,
+            "third_place": third_place,
+            "fourth_place": fourth_place,
+        },
+        "final_match": summary_match(final_match),
+        "third_place_match": summary_match(third_place_match),
+        "awards": {
+            "best_player": award_item(
+                "Rodri",
+                "Spain",
+                "Golden Ball",
+                "بهترین بازیکن جام",
+                team_lookup,
+                name_fa="رودری",
+                team_fa="اسپانیا",
+            ),
+            "top_scorer": award_item(
+                "Kylian Mbappé",
+                "France",
+                "Golden Boot",
+                "آقای گل",
+                team_lookup,
+                name_fa="کیلیان امباپه",
+                team_fa="فرانسه",
+                goals=10,
+                goals_label_fa="۱۰ گل",
+            ),
+            "top_assister": award_item(
+                "Michael Olise",
+                "France",
+                "Top Assister / Creativity Leader",
+                "پاسور برتر / صدرنشین خلاقیت",
+                team_lookup,
+                name_fa="مایکل اولیسه",
+                team_fa="فرانسه",
+                assists=5,
+                assists_label_fa="۵ پاس گل",
+                note_en=top_assister_note_en,
+                note_fa="مایکل اولیسه در رده‌بندی خلاقیت فیفا صدرنشین شد؛ آمار پاس گل ممکن است بین منابع متفاوت باشد.",
+            ),
+            "best_goalkeeper": award_item(
+                "Unai Simón",
+                "Spain",
+                "Golden Glove",
+                "بهترین دروازه‌بان",
+                team_lookup,
+                name_fa="اونای سیمون",
+                team_fa="اسپانیا",
+            ),
+            "best_young_player": award_item(
+                "Pau Cubarsí",
+                "Spain",
+                "Young Player Award",
+                "بهترین بازیکن جوان",
+                team_lookup,
+                name_fa="پائو کوبارسی",
+                team_fa="اسپانیا",
+            ),
+        },
+        "highlights": {
+            "highest_scoring_match": summary_match_with_total(highest_scoring_match),
+            "biggest_wins": biggest_wins,
+        },
+        "data_notes": {
+            "awards_source": "manual_seeded",
+            "top_assister_note_fa": top_assister_note_fa,
+            "top_assister_note_en": top_assister_note_en,
+        },
+    }
+
+
 def is_finished_override(override):
     status = str(override.get("status") or "").strip().lower()
     return status in {"finished", "finish", "ft", "full_time", "fulltime", "completed", "complete"}

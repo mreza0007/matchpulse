@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from scheduler_service import start_scheduler
 from data import NEWS
-from real_data_service import get_match_events, get_real_matches, get_real_teams
+from real_data_service import get_match_events, get_real_matches, get_real_teams, get_worldcup_summary
 from services.worldcup_adapter import get_match_live_from_worldcup_wrapper, start_worldcup_wrapper_poller
 
 from db_service import (
@@ -144,6 +144,11 @@ def get_matches(status: str = Query("all")):
         "status": status,
         "matches": matches,
     }
+
+
+@api.get("/worldcup/summary")
+def get_worldcup_archive_summary():
+    return get_worldcup_summary()
 
 
 @api.get("/match/{match_id}/events")
