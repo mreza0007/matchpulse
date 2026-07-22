@@ -565,19 +565,6 @@ const translations = {
     live: "زنده",
     upcoming: "بازی‌های پیش‌رو",
     past: "نتایج",
-    bracket: "نمودار بازی‌ها",
-    bracketTitle: "مسیر قهرمانی",
-    bracketSubtitle: "مسیر مرحله حذفی جام جهانی؛ از یک‌شانزدهم نهایی تا فینال",
-    bracketSwipeHint: "برای دیدن کامل نمودار، به چپ و راست بکشید",
-    zoomIn: "بزرگ‌نمایی",
-    zoomOut: "کوچک‌نمایی",
-    resetZoom: "بازنشانی",
-    roundOf32: "یک‌شانزدهم نهایی",
-    roundOf16: "یک‌هشتم نهایی",
-    quarterfinals: "یک‌چهارم نهایی",
-    semifinals: "نیمه‌نهایی",
-    final: "فینال",
-    thirdPlace: "رده‌بندی",
     news: "اخبار",
     profile: "پروفایل",
     vs: "مقابل",
@@ -692,19 +679,6 @@ const translations = {
     live: "Live",
     upcoming: "Upcoming",
     past: "Results",
-    bracket: "Bracket",
-    bracketTitle: "Road to the Trophy",
-    bracketSubtitle: "The World Cup knockout path, from the round of 32 to the final.",
-    bracketSwipeHint: "Swipe horizontally to view the full bracket",
-    zoomIn: "Zoom in",
-    zoomOut: "Zoom out",
-    resetZoom: "Reset",
-    roundOf32: "Round of 32",
-    roundOf16: "Round of 16",
-    quarterfinals: "Quarterfinals",
-    semifinals: "Semifinals",
-    final: "Final",
-    thirdPlace: "Third place",
     news: "News",
     profile: "Profile",
     vs: "vs",
@@ -971,12 +945,12 @@ function normalizeMatchPayload(match) {
   };
 }
 
-function PenaltySummary({ match, lang, compact = false }) {
+function PenaltySummary({ match, lang }) {
   const summary = getPenaltySummary(match, lang);
   if (!summary) return null;
 
   return (
-    <div className={compact ? "bracket-penalty-summary" : "penalty-summary"}>
+    <div className="penalty-summary">
       {summary}
     </div>
   );
@@ -1406,123 +1380,6 @@ function HeroMatchCard({ label, mode, match, lang, t, children }) {
       </div>
       {children}
     </section>
-  );
-}
-
-function BracketMatchCard({ match, lang, t }) {
-  if (!match) return <div className="bracket-match bracket-match-empty" aria-hidden="true" />;
-
-  const status = getMatchStatus(match, lang, t);
-  const score = getMatchScore(match);
-  const showScore = ["live", "finished"].includes(status.key);
-  const homeName = getLocalizedTeamName(match, "home", lang) || match.home_team_label || t.unavailable;
-  const awayName = getLocalizedTeamName(match, "away", lang) || match.away_team_label || t.unavailable;
-  const penaltySummary = getPenaltySummary(match, lang);
-
-  return (
-    <article
-      className={`bracket-match ${status.key === "live" ? "is-live" : ""} ${status.key === "finished" ? "is-finished" : ""} ${penaltySummary ? "has-penalties" : ""}`}
-      dir={t.dir}
-    >
-      <header className="bracket-match-meta">
-        <span>{match.date_iran || "—"}</span>
-        <span>{match.time_iran || "—"}</span>
-        <span className={`bracket-status ${status.key}`}>{status.label}</span>
-      </header>
-
-      <div className="bracket-team-row">
-        <TeamFlag flagEmoji={match.home_flag} teamName={match.home_en} />
-        <strong title={homeName}>{homeName}</strong>
-        <b>{showScore ? getScoreValue(match, ["home_score", "homeScore"]) ?? "—" : ""}</b>
-      </div>
-      <div className="bracket-team-row">
-        <TeamFlag flagEmoji={match.away_flag} teamName={match.away_en} />
-        <strong title={awayName}>{awayName}</strong>
-        <b>{showScore ? getScoreValue(match, ["away_score", "awayScore"]) ?? "—" : ""}</b>
-      </div>
-
-      <PenaltySummary match={match} lang={lang} compact />
-
-      {showScore && score && <span className="bracket-score-summary">{score}</span>}
-      <span className="bracket-match-number">#{match.id}</span>
-    </article>
-  );
-}
-
-function BracketColumn({ ids, matchesById, round, title, side, lang, t }) {
-  return (
-    <section className={`bracket-column round-${round} side-${side}`}>
-      <h3>{title}</h3>
-      <div className="bracket-slots">
-        {ids.map((id) => (
-          <div className="bracket-slot" key={id}>
-            <BracketMatchCard match={matchesById.get(id)} lang={lang} t={t} />
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function KnockoutBracket({ matches, lang, t }) {
-  const [zoom, setZoom] = useState(1);
-  const matchesById = useMemo(
-    () => new Map(
-      matches
-        .filter((match) => Number(match.id) >= 73 && Number(match.id) <= 104)
-        .map((match) => [Number(match.id), match]),
-    ),
-    [matches],
-  );
-  const updateZoom = (change) => {
-    setZoom((current) => Math.min(1.25, Math.max(0.75, Number((current + change).toFixed(2)))));
-  };
-  const stageStyle = {
-    "--bracket-zoom": zoom,
-    width: `${1668 * zoom}px`,
-    height: `${1090 * zoom}px`,
-  };
-
-  return (
-    <div className="bracket-scroll-shell">
-      <div className="bracket-tools" dir={t.dir}>
-        <p>{t.bracketSwipeHint}</p>
-        <div className="bracket-zoom-controls" aria-label={t.bracketTitle}>
-          <button type="button" title={t.zoomOut} aria-label={t.zoomOut} onClick={() => updateZoom(-0.1)} disabled={zoom <= 0.75}>−</button>
-          <span aria-live="polite">{Math.round(zoom * 100)}%</span>
-          <button type="button" title={t.zoomIn} aria-label={t.zoomIn} onClick={() => updateZoom(0.1)} disabled={zoom >= 1.25}>+</button>
-          <button type="button" className="bracket-reset-btn" onClick={() => setZoom(1)} disabled={zoom === 1}>{t.resetZoom}</button>
-        </div>
-      </div>
-
-      <div className="bracket-scroll bracket-scroll-area" dir="ltr">
-        <div className="bracket-stage" style={stageStyle}>
-          <div className="bracket-board">
-            <BracketColumn ids={[74, 77, 73, 75, 83, 84, 81, 82]} matchesById={matchesById} round="r32" title={t.roundOf32} side="left" lang={lang} t={t} />
-            <BracketColumn ids={[89, 90, 93, 94]} matchesById={matchesById} round="r16" title={t.roundOf16} side="left" lang={lang} t={t} />
-            <BracketColumn ids={[97, 98]} matchesById={matchesById} round="qf" title={t.quarterfinals} side="left" lang={lang} t={t} />
-            <BracketColumn ids={[101]} matchesById={matchesById} round="sf" title={t.semifinals} side="left" lang={lang} t={t} />
-
-            <section className="bracket-center" dir={t.dir}>
-              <div className="bracket-center-match final-match">
-                <h3>{t.final}</h3>
-                <BracketMatchCard match={matchesById.get(104)} lang={lang} t={t} />
-              </div>
-              <div className="bracket-trophy" aria-hidden="true"><span>MP</span></div>
-              <div className="bracket-center-match third-match">
-                <h3>{t.thirdPlace}</h3>
-                <BracketMatchCard match={matchesById.get(103)} lang={lang} t={t} />
-              </div>
-            </section>
-
-            <BracketColumn ids={[102]} matchesById={matchesById} round="sf" title={t.semifinals} side="right" lang={lang} t={t} />
-            <BracketColumn ids={[99, 100]} matchesById={matchesById} round="qf" title={t.quarterfinals} side="right" lang={lang} t={t} />
-            <BracketColumn ids={[91, 92, 95, 96]} matchesById={matchesById} round="r16" title={t.roundOf16} side="right" lang={lang} t={t} />
-            <BracketColumn ids={[76, 78, 79, 80, 86, 88, 85, 87]} matchesById={matchesById} round="r32" title={t.roundOf32} side="right" lang={lang} t={t} />
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -2468,25 +2325,6 @@ function App() {
         </section>
       )}
 
-      {activeTab === "bracket" && (
-        <section className="section bracket-section">
-          <div className="bracket-heading" dir={t.dir}>
-            <div>
-              <span className="bracket-kicker">MATCHPULSE 2026</span>
-              <h2>{t.bracketTitle}</h2>
-              <p>{t.bracketSubtitle}</p>
-            </div>
-            <span className="bracket-heading-mark" aria-hidden="true">MP</span>
-          </div>
-
-          {isLoadingMatches && <p className="bracket-message">{t.loadingMatches}</p>}
-          {!isLoadingMatches && matchesError && <p className="bracket-message">{matchesError}</p>}
-          {!isLoadingMatches && !matchesError && (
-            <KnockoutBracket matches={matches} lang={lang} t={t} />
-          )}
-        </section>
-      )}
-
       {activeTab === "worldcup" && (
         <section className="section archive-section">
           <div className="section-header">
@@ -2695,13 +2533,6 @@ function App() {
           onClick={() => setActiveTab("past")}
         >
           🏁 {t.past}
-        </button>
-
-        <button
-          className={activeTab === "bracket" ? "active" : ""}
-          onClick={() => setActiveTab("bracket")}
-        >
-          ◇ {t.bracket}
         </button>
 
         <button
