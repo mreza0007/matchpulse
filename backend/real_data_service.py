@@ -137,6 +137,53 @@ def summary_match_with_goal_diff(match):
     return item
 
 
+def match_team_names(match, side):
+    return {
+        str(match.get(f"{side}_en") or "").strip().lower(),
+        str(match.get(f"{side}_fa") or "").strip().lower(),
+        str(match.get(f"{side}_team_label") or "").strip().lower(),
+    }
+
+
+def find_match_by_teams_and_score(matches, home_names, away_names, score):
+    normalized_home_names = {str(name).strip().lower() for name in home_names if name}
+    normalized_away_names = {str(name).strip().lower() for name in away_names if name}
+
+    for match in matches:
+        home_score, away_score = match_score(match)
+        if (home_score, away_score) != score:
+            continue
+
+        home_match_names = match_team_names(match, "home")
+        away_match_names = match_team_names(match, "away")
+        if home_match_names & normalized_home_names and away_match_names & normalized_away_names:
+            return match
+
+    return None
+
+
+def manual_best_win_summary():
+    return {
+        "id": "portugal-uzbekistan-best-win",
+        "home_fa": "پرتغال",
+        "home_en": "Portugal",
+        "away_fa": "ازبکستان",
+        "away_en": "Uzbekistan",
+        "home_flag": "🇵🇹",
+        "away_flag": "🇺🇿",
+        "home_flag_url": "",
+        "away_flag_url": "",
+        "score": {
+            "home": 5,
+            "away": 0,
+        },
+        "home_score": 5,
+        "away_score": 0,
+        "result": "home",
+        "goal_diff": 5,
+    }
+
+
 def team_lookup_from_matches(matches):
     lookup = {}
     for match in matches:
@@ -191,19 +238,16 @@ def get_worldcup_summary():
         key=lambda match: sum(match_score(match)),
         default=None,
     )
-    max_goal_diff = max(
-        (abs(match_score(match)[0] - match_score(match)[1]) for match in scored_matches),
-        default=0,
+    best_win_match = find_match_by_teams_and_score(
+        scored_matches,
+        {"Portugal", "پرتغال"},
+        {"Uzbekistan", "ازبکستان"},
+        (5, 0),
     )
-    biggest_wins = [
-        summary_match_with_goal_diff(match)
-        for match in scored_matches
-        if abs(match_score(match)[0] - match_score(match)[1]) == max_goal_diff and max_goal_diff > 0
-    ]
+    best_win = summary_match_with_goal_diff(best_win_match) if best_win_match else manual_best_win_summary()
+    biggest_wins = [best_win]
 
     team_lookup = team_lookup_from_matches(matches)
-    top_assister_note_en = "Some sources list 7 assists; FIFA top-assisters page snippet lists 5."
-    top_assister_note_fa = "برخی منابع ۷ پاس گل گزارش کرده‌اند؛ داده رسمی‌تر فیفا ۵ پاس گل را نشان می‌دهد."
 
     return {
         "competition_key": "worldcup2026",
@@ -250,8 +294,6 @@ def get_worldcup_summary():
                 team_fa="فرانسه",
                 assists=5,
                 assists_label_fa="۵ پاس گل",
-                note_en=top_assister_note_en,
-                note_fa="مایکل اولیسه در رده‌بندی خلاقیت فیفا صدرنشین شد؛ آمار پاس گل ممکن است بین منابع متفاوت باشد.",
             ),
             "best_goalkeeper": award_item(
                 "Unai Simón",
@@ -274,12 +316,11 @@ def get_worldcup_summary():
         },
         "highlights": {
             "highest_scoring_match": summary_match_with_total(highest_scoring_match),
+            "best_win": best_win,
             "biggest_wins": biggest_wins,
         },
         "data_notes": {
             "awards_source": "manual_seeded",
-            "top_assister_note_fa": top_assister_note_fa,
-            "top_assister_note_en": top_assister_note_en,
         },
     }
 

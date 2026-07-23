@@ -552,13 +552,11 @@ const translations = {
     awardsTitle: "افتخارات فردی",
     finalMatchesTitle: "بازی‌های پایانی",
     highlightsTitle: "لحظه‌های شاخص",
-    highestScoringMatch: "پرگل‌ترین بازی",
-    biggestWins: "بزرگ‌ترین بردها",
+    bestWin: "بهترین برد",
     finalMatchLabel: "فینال",
     thirdPlaceMatchLabel: "رده‌بندی",
     goalsLabel: "گل",
     assistsLabel: "پاس گل",
-    goalDiffLabel: "اختلاف گل",
     matchesError: "دریافت بازی‌ها ناموفق بود. دوباره تلاش کن.",
     unavailable: "نامشخص",
     home: "خانه",
@@ -666,13 +664,11 @@ const translations = {
     awardsTitle: "Individual Honors",
     finalMatchesTitle: "Final Matches",
     highlightsTitle: "Tournament Highlights",
-    highestScoringMatch: "Highest scoring match",
-    biggestWins: "Biggest wins",
+    bestWin: "Best win",
     finalMatchLabel: "Final",
     thirdPlaceMatchLabel: "Third-place match",
     goalsLabel: "goals",
     assistsLabel: "assists",
-    goalDiffLabel: "Goal diff",
     matchesError: "Could not load matches. Please try again.",
     unavailable: "Unavailable",
     home: "Home",
@@ -1063,7 +1059,6 @@ function AwardCard({ award, lang, t }) {
       : award.assists
         ? `${award.assists} ${t.assistsLabel}`
         : "";
-  const note = lang === "fa" ? award.note_fa : award.note_en;
 
   return (
     <article className="award-card">
@@ -1074,7 +1069,6 @@ function AwardCard({ award, lang, t }) {
         {summaryName(team, lang)}
       </span>
       {stat && <b>{stat}</b>}
-      {note && <small>{note}</small>}
     </article>
   );
 }
@@ -1141,22 +1135,11 @@ function WorldCupArchive({ summary, isLoading, error, lang, t }) {
         </div>
         <div className="archive-grid">
           <SummaryMatchCard
-            title={t.highestScoringMatch}
-            match={highlights.highest_scoring_match}
+            title={t.bestWin}
+            match={highlights.best_win || highlights.biggest_wins?.[0]}
             lang={lang}
             t={t}
-            highlight={highlights.highest_scoring_match?.total_goals ? `${highlights.highest_scoring_match.total_goals} ${t.goalsLabel}` : ""}
           />
-          {(highlights.biggest_wins || []).map((match) => (
-            <SummaryMatchCard
-              key={match.id}
-              title={t.biggestWins}
-              match={match}
-              lang={lang}
-              t={t}
-              highlight={match.goal_diff ? `${t.goalDiffLabel}: ${match.goal_diff}` : ""}
-            />
-          ))}
         </div>
       </section>
     </div>
