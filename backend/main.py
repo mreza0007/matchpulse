@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from scheduler_service import start_scheduler
 from data import NEWS
+from competition_service import get_competition, get_competitions
 from real_data_service import get_match_events, get_real_matches, get_real_teams, get_worldcup_summary
 from services.worldcup_adapter import get_match_live_from_worldcup_wrapper, start_worldcup_wrapper_poller
 
@@ -106,6 +107,21 @@ def load_memory_from_db():
 @api.get("/")
 def home():
     return {"status": "MatchPulse backend is running"}
+
+
+@api.get("/competitions")
+def list_competitions():
+    competitions = get_competitions()
+    return {"competitions": competitions}
+
+
+@api.get("/competitions/{competition_key}")
+def get_competition_details(competition_key: str):
+    competition = get_competition(competition_key)
+    if not competition:
+        raise HTTPException(status_code=404, detail="Competition not found")
+
+    return competition
 
 
 @api.post("/user")
