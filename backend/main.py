@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from scheduler_service import start_scheduler
 from data import NEWS
 from competition_service import get_competition, get_competitions
+from competition_data_service import get_matches_for_competition, get_teams_for_competition
 from real_data_service import get_match_events, get_real_matches, get_real_teams, get_worldcup_summary
 from services.worldcup_adapter import get_match_live_from_worldcup_wrapper, start_worldcup_wrapper_poller
 
@@ -121,7 +122,9 @@ def get_competition_matches(competition_key: str, status: str = Query("all")):
     if not competition:
         raise HTTPException(status_code=404, detail="Competition not found")
 
-    matches = get_real_matches(status=status)
+    matches = get_matches_for_competition(competition_key, status=status)
+    if matches is None:
+        raise HTTPException(status_code=501, detail="Competition data source not configured")
 
     return {
         "count": len(matches),
@@ -136,7 +139,9 @@ def get_competition_teams(competition_key: str):
     if not competition:
         raise HTTPException(status_code=404, detail="Competition not found")
 
-    teams = get_real_teams()
+    teams = get_teams_for_competition(competition_key)
+    if teams is None:
+        raise HTTPException(status_code=501, detail="Competition data source not configured")
 
     return {
         "count": len(teams),
