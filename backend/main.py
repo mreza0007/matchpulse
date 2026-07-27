@@ -115,6 +115,21 @@ def list_competitions():
     return {"competitions": competitions}
 
 
+@api.get("/competitions/{competition_key}/matches")
+def get_competition_matches(competition_key: str, status: str = Query("all")):
+    competition = get_competition(competition_key)
+    if not competition:
+        raise HTTPException(status_code=404, detail="Competition not found")
+
+    matches = get_real_matches(status=status)
+
+    return {
+        "count": len(matches),
+        "status": status,
+        "matches": matches,
+    }
+
+
 @api.get("/competitions/{competition_key}")
 def get_competition_details(competition_key: str):
     competition = get_competition(competition_key)
