@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from scheduler_service import start_scheduler
 from data import NEWS
 from competition_service import get_competition, get_competitions
-from competition_data_service import get_matches_for_competition, get_teams_for_competition
+from competition_data_service import get_matches_for_competition, get_matches_for_season, get_teams_for_competition
 from season_service import get_season, get_seasons
 from real_data_service import get_match_events, get_real_matches, get_real_teams, get_worldcup_summary
 from services.worldcup_adapter import get_match_live_from_worldcup_wrapper, start_worldcup_wrapper_poller
@@ -162,6 +162,27 @@ def list_competition_seasons(competition_key: str):
         "competition_key": competition["competition_key"],
         "count": len(seasons),
         "seasons": seasons,
+    }
+
+
+@api.get("/competitions/{competition_key}/seasons/{season_key}/matches")
+def get_competition_season_matches(competition_key: str, season_key: str, status: str = Query("all")):
+    competition = get_competition(competition_key)
+    if not competition:
+        raise HTTPException(status_code=404, detail="Competition not found")
+
+    season = get_season(competition_key, season_key)
+    if not season:
+        raise HTTPException(status_code=404, detail="Season not found")
+
+    matches = get_matches_for_season(competition_key, season_key, status=status)
+    if matches is None:
+        raise HTTPException(status_code=501, detail="Competition season data source not configured")
+
+    return {
+        "count": len(matches),
+        "status": status,
+        "matches": matches,
     }
 
 
