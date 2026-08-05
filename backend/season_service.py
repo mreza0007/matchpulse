@@ -35,3 +35,16 @@ def get_season(competition_key, season_key):
             return season.copy()
 
     return None
+
+
+def get_default_season(competition_key):
+    normalized_competition_key = normalize_key(competition_key)
+
+    for season in SEASONS:
+        if (
+            normalize_key(season.get("competition_key")) == normalized_competition_key
+            and season.get("is_default") is True
+        ):
+            return season.copy()
+
+    return None

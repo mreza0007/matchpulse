@@ -1,4 +1,5 @@
 from real_data_service import get_real_matches, get_real_teams
+from season_service import get_default_season
 
 
 def normalize_competition_key(value):
@@ -11,7 +12,6 @@ def normalize_season_key(value):
 
 COMPETITION_DATA_PROVIDERS = {
     "worldcup2026": {
-        "default_season": "2026",
         "seasons": {
             "2026": {
                 "matches": get_real_matches,
@@ -23,11 +23,11 @@ COMPETITION_DATA_PROVIDERS = {
 
 
 def get_matches_for_competition(competition_key, status="all"):
-    provider = COMPETITION_DATA_PROVIDERS.get(normalize_competition_key(competition_key))
-    if not provider or not provider.get("default_season"):
+    default_season = get_default_season(competition_key)
+    if not default_season:
         return None
 
-    return get_matches_for_season(competition_key, provider["default_season"], status=status)
+    return get_matches_for_season(competition_key, default_season["season_key"], status=status)
 
 
 def get_matches_for_season(competition_key, season_key, status="all"):
@@ -44,11 +44,11 @@ def get_matches_for_season(competition_key, season_key, status="all"):
 
 
 def get_teams_for_competition(competition_key):
-    provider = COMPETITION_DATA_PROVIDERS.get(normalize_competition_key(competition_key))
-    if not provider or not provider.get("default_season"):
+    default_season = get_default_season(competition_key)
+    if not default_season:
         return None
 
-    return get_teams_for_season(competition_key, provider["default_season"])
+    return get_teams_for_season(competition_key, default_season["season_key"])
 
 
 def get_teams_for_season(competition_key, season_key):
