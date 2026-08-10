@@ -10,6 +10,8 @@ from scheduler_service import start_scheduler
 from data import NEWS
 from competition_service import get_competition, get_competitions
 from competition_data_service import (
+    get_match_events_for_season,
+    get_match_live_for_season,
     get_matches_for_competition,
     get_matches_for_season,
     get_teams_for_competition,
@@ -209,6 +211,40 @@ def get_competition_season_teams(competition_key: str, season_key: str):
         "count": len(teams),
         "teams": teams,
     }
+
+
+@api.get("/competitions/{competition_key}/seasons/{season_key}/matches/{match_id}/live")
+def get_competition_season_match_live(competition_key: str, season_key: str, match_id: str):
+    competition = get_competition(competition_key)
+    if not competition:
+        raise HTTPException(status_code=404, detail="Competition not found")
+
+    season = get_season(competition_key, season_key)
+    if not season:
+        raise HTTPException(status_code=404, detail="Season not found")
+
+    live = get_match_live_for_season(competition_key, season_key, match_id)
+    if live is None:
+        raise HTTPException(status_code=501, detail="Competition season live data source not configured")
+
+    return live
+
+
+@api.get("/competitions/{competition_key}/seasons/{season_key}/matches/{match_id}/events")
+def get_competition_season_match_events(competition_key: str, season_key: str, match_id: str):
+    competition = get_competition(competition_key)
+    if not competition:
+        raise HTTPException(status_code=404, detail="Competition not found")
+
+    season = get_season(competition_key, season_key)
+    if not season:
+        raise HTTPException(status_code=404, detail="Season not found")
+
+    events = get_match_events_for_season(competition_key, season_key, match_id)
+    if events is None:
+        raise HTTPException(status_code=501, detail="Competition season events data source not configured")
+
+    return events
 
 
 @api.get("/competitions/{competition_key}/seasons/{season_key}")

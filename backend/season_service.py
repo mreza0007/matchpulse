@@ -7,6 +7,14 @@ SEASONS = [
         "status": "archived",
         "is_default": True,
     },
+    {
+        "competition_key": "premier_league",
+        "season_key": "2026-2027",
+        "name_fa": "لیگ برتر انگلیس ۲۰۲۶-۲۰۲۷",
+        "name_en": "Premier League 2026-2027",
+        "status": "active",
+        "is_default": True,
+    },
 ]
 
 

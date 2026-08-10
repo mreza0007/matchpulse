@@ -1,5 +1,13 @@
+from functools import partial
+
 from real_data_service import get_real_matches, get_real_teams
 from season_service import get_default_season
+from services.generic_football_adapter import (
+    get_match_events as get_generic_match_events,
+    get_match_live as get_generic_match_live,
+    get_season_matches as get_generic_season_matches,
+    get_season_teams as get_generic_season_teams,
+)
 
 
 def normalize_competition_key(value):
@@ -19,7 +27,26 @@ COMPETITION_DATA_PROVIDERS = {
             },
         },
     },
+    "premier_league": {
+        "seasons": {
+            "2026-2027": {
+                "matches": partial(get_generic_season_matches, "premier_league", "2026-2027"),
+                "teams": partial(get_generic_season_teams, "premier_league", "2026-2027"),
+                "live": get_generic_match_live,
+                "events": get_generic_match_events,
+            },
+        },
+    },
 }
+
+
+def get_season_provider(competition_key, season_key):
+    provider = COMPETITION_DATA_PROVIDERS.get(normalize_competition_key(competition_key))
+    if not provider:
+        return None
+
+    seasons = provider.get("seasons") or {}
+    return seasons.get(normalize_season_key(season_key))
 
 
 def get_matches_for_competition(competition_key, status="all"):
@@ -31,12 +58,7 @@ def get_matches_for_competition(competition_key, status="all"):
 
 
 def get_matches_for_season(competition_key, season_key, status="all"):
-    provider = COMPETITION_DATA_PROVIDERS.get(normalize_competition_key(competition_key))
-    if not provider:
-        return None
-
-    seasons = provider.get("seasons") or {}
-    season_provider = seasons.get(normalize_season_key(season_key))
+    season_provider = get_season_provider(competition_key, season_key)
     if not season_provider or not season_provider.get("matches"):
         return None
 
@@ -52,13 +74,24 @@ def get_teams_for_competition(competition_key):
 
 
 def get_teams_for_season(competition_key, season_key):
-    provider = COMPETITION_DATA_PROVIDERS.get(normalize_competition_key(competition_key))
-    if not provider:
-        return None
-
-    seasons = provider.get("seasons") or {}
-    season_provider = seasons.get(normalize_season_key(season_key))
+    season_provider = get_season_provider(competition_key, season_key)
     if not season_provider or not season_provider.get("teams"):
         return None
 
     return season_provider["teams"]()
+
+
+def get_match_live_for_season(competition_key, season_key, match_id):
+    season_provider = get_season_provider(competition_key, season_key)
+    if not season_provider or not season_provider.get("live"):
+        return None
+
+    return season_provider["live"](match_id)
+
+
+def get_match_events_for_season(competition_key, season_key, match_id):
+    season_provider = get_season_provider(competition_key, season_key)
+    if not season_provider or not season_provider.get("events"):
+        return None
+
+    return season_provider["events"](match_id)

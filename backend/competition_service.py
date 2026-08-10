@@ -13,6 +13,19 @@ COMPETITIONS = [
         "supports_archive": True,
         "default_tab": "archive",
     },
+    {
+        "competition_key": "premier_league",
+        "season_key": "2026-2027",
+        "name_fa": "لیگ برتر انگلیس",
+        "name_en": "Premier League",
+        "type": "club",
+        "status": "active",
+        "is_active": True,
+        "supports_matches": True,
+        "supports_standings": True,
+        "supports_predictions": False,
+        "supports_archive": False,
+    },
 ]
 
 
