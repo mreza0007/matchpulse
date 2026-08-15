@@ -170,6 +170,63 @@ button {
   gap: 10px;
 }
 
+.team-flag.team-logo {
+  width: 32px;
+  height: 32px;
+  padding: 3px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.team-logo-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: 50%;
+  object-fit: contain;
+}
+
+.hero-match-card .team-flag.team-logo {
+  width: 38px;
+  height: 38px;
+}
+
+@media (max-width: 600px) {
+  .hero-match-card .team-flag.team-logo {
+    width: 32px;
+    height: 32px;
+  }
+}
+
+.competition-selector {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  padding: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(3, 8, 15, 0.3);
+}
+
+.competition-selector button {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--theme-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.competition-selector button.active {
+  border-color: rgba(var(--theme-accent-rgb), 0.26);
+  background: rgba(var(--theme-accent-rgb), 0.12);
+  color: var(--theme-text);
+}
+
 .brand-logo {
   position: relative;
   width: clamp(92px, 24vw, 124px);
@@ -1482,6 +1539,10 @@ h1 {
   gap: 8px;
 }
 
+.stats-row.two-stats {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .stats-row div {
   display: grid;
   gap: 3px;
@@ -2540,6 +2601,11 @@ h1 {
 
   .bottom-nav {
     grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .competition-selector button {
+    padding-inline: 7px;
+    font-size: 11px;
   }
 
   .match-meta-grid,

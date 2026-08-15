@@ -3,6 +3,53 @@ import "./App.css";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL;
 
+const COMPETITIONS = {
+  worldcup2026: {
+    competitionKey: "worldcup2026",
+    seasonKey: "2026",
+    labels: {
+      fa: "\u062c\u0627\u0645 \u062c\u0647\u0627\u0646\u06cc \u06f2\u06f0\u06f2\u06f6",
+      en: "World Cup 2026",
+    },
+    dataUrls: {
+      matches: `${API_BASE_URL}/matches`,
+      teams: `${API_BASE_URL}/teams`,
+      events: (matchId) => `${API_BASE_URL}/match/${matchId}/events`,
+    },
+    logoSrc: "/world-cup-2026-logo.webp",
+    logoFallback: "WC 2026",
+    fixedStats: { teams: 48, matches: 104, cities: 16 },
+    supportsFavorites: true,
+    supportsReminders: true,
+    supportsPredictions: true,
+    supportsScopedEvents: false,
+  },
+  premier_league: {
+    competitionKey: "premier_league",
+    seasonKey: "2026-2027",
+    labels: {
+      fa: "\u0644\u06cc\u06af \u0628\u0631\u062a\u0631 \u0627\u0646\u06af\u0644\u06cc\u0633",
+      en: "Premier League",
+    },
+    subtitles: {
+      fa: "\u0628\u0631\u0646\u0627\u0645\u0647 \u0628\u0627\u0632\u06cc\u200c\u0647\u0627\u060c \u0646\u062a\u0627\u06cc\u062c \u0648 \u0648\u0636\u0639\u06cc\u062a \u0632\u0646\u062f\u0647 \u0644\u06cc\u06af \u0628\u0631\u062a\u0631 \u0627\u0646\u06af\u0644\u06cc\u0633",
+      en: "Fixtures, results and live match status for the Premier League",
+    },
+    dataUrls: {
+      matches: `${API_BASE_URL}/competitions/premier_league/seasons/2026-2027/matches?status=all`,
+      teams: `${API_BASE_URL}/competitions/premier_league/seasons/2026-2027/teams`,
+      events: (matchId) => `${API_BASE_URL}/competitions/premier_league/seasons/2026-2027/matches/${encodeURIComponent(matchId)}/events`,
+    },
+    logoSrc: "",
+    logoFallback: "PL",
+    fixedStats: null,
+    supportsFavorites: false,
+    supportsReminders: false,
+    supportsPredictions: false,
+    supportsScopedEvents: true,
+  },
+};
+
 const TEAM_FLAG_OVERRIDES = {
   England: "gb-eng",
   Scotland: "gb-sct",
@@ -36,16 +83,21 @@ function getFlagImageUrl(flagEmoji, teamName) {
   return code ? `https://flagcdn.com/w80/${code}.png` : "";
 }
 
-function TeamFlag({ flagEmoji, teamName }) {
-  const imageUrl = getFlagImageUrl(flagEmoji, teamName);
+function TeamFlag({ flagEmoji, teamName, logoUrl = "" }) {
+  const flagImageUrl = getFlagImageUrl(flagEmoji, teamName);
+  const backendLogoUrl = typeof logoUrl === "string" && /^https?:\/\//i.test(logoUrl.trim())
+    ? logoUrl.trim()
+    : "";
+  const imageUrl = flagImageUrl || backendLogoUrl;
+  const isTeamLogo = !flagImageUrl && Boolean(backendLogoUrl);
   const [failedImageUrl, setFailedImageUrl] = useState("");
   const hasError = failedImageUrl === imageUrl;
 
   return (
-    <span className="team-flag" aria-hidden="true">
+    <span className={`team-flag ${isTeamLogo ? "team-logo" : ""}`} aria-hidden="true">
       {imageUrl && !hasError ? (
         <img
-          className="team-flag-img"
+          className={isTeamLogo ? "team-logo-img" : "team-flag-img"}
           src={imageUrl}
           alt=""
           loading="lazy"
@@ -58,20 +110,22 @@ function TeamFlag({ flagEmoji, teamName }) {
   );
 }
 
-function BrandLogo() {
+function BrandLogo({ competition, lang }) {
   const [hasError, setHasError] = useState(false);
+  const label = competition.labels[lang] || competition.labels.en;
+  const showImage = Boolean(competition.logoSrc) && !hasError;
 
   return (
-    <div className="brand-logo" aria-label="World Cup 2026">
-      {!hasError ? (
+    <div className="brand-logo" aria-label={label}>
+      {showImage ? (
         <img
           className="brand-logo-img"
-          src="/world-cup-2026-logo.webp"
-          alt="World Cup 2026"
+          src={competition.logoSrc}
+          alt={label}
           onError={() => setHasError(true)}
         />
       ) : (
-        <span className="brand-logo-fallback">WC 2026</span>
+        <span className="brand-logo-fallback">{competition.logoFallback}</span>
       )}
     </div>
   );
@@ -130,8 +184,9 @@ function matchesAreEqual(currentMatch, nextMatch) {
 function getLocalizedTeamName(match, side, lang) {
   const localizedKey = `${side}_${lang}`;
   const englishKey = `${side}_en`;
+  const persianKey = `${side}_fa`;
 
-  return match?.[localizedKey] || match?.[englishKey] || "";
+  return match?.[localizedKey] || match?.[englishKey] || match?.[persianKey] || "";
 }
 
 function normalizeTeamKey(value) {
@@ -257,7 +312,9 @@ function getMatchDateKey(match) {
   if (match?.date_key) return match.date_key;
 
   const kickoffDate = parseKickoffDate(match);
-  if (!kickoffDate) return "";
+  if (!kickoffDate) {
+    return String(match?.date_iran || match?.date || match?.date_fa || "").trim();
+  }
 
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Tehran",
@@ -479,6 +536,7 @@ const translations = {
   fa: {
     dir: "rtl",
     langButton: "English",
+    competitionSelector: "\u0627\u0646\u062a\u062e\u0627\u0628 \u0631\u0642\u0627\u0628\u062a",
     worldCup: "جام جهانی ۲۰۲۶",
     title: "MatchPulse",
     brandLabel: "همراه جام جهانی",
@@ -590,6 +648,7 @@ const translations = {
   },
   en: {
     dir: "ltr",
+    competitionSelector: "Select competition",
     langButton: "فارسی",
     worldCup: "World Cup 2026",
     title: "MatchPulse",
@@ -1172,6 +1231,8 @@ function MatchCard({
   predictionWasSaved = false,
   predictionSaveFailed = false,
   predictionForceLocked = false,
+  showFavorites = true,
+  showPredictions = true,
 }) {
   const matchStatus = getMatchStatus(match, lang, t);
   const isLive = isLiveMatch(match);
@@ -1196,9 +1257,13 @@ function MatchCard({
 
     return (
       <strong className="team-name">
-        <TeamFlag flagEmoji={flag} teamName={englishName} />
+        <TeamFlag
+          flagEmoji={flag}
+          logoUrl={team?.logo || team?.logo_url || ""}
+          teamName={englishName}
+        />
         {name}
-        {team && (
+        {showFavorites && team && (
           <button
             className={`favorite-star ${isFavorite ? "active" : ""}`}
             aria-label={isFavorite ? t.removeFavorite : t.addFavorite}
@@ -1262,7 +1327,7 @@ function MatchCard({
         </div>
       )}
 
-      {showPrediction && (
+      {showPredictions && showPrediction && (
         <div className={`prediction-panel ${predictionLocked ? "locked" : ""}`}>
           <div className="prediction-heading">
             <strong>{t.prediction}</strong>
@@ -1376,12 +1441,16 @@ function NewsCard({ item, lang }) {
 }
 
 function TeamCard({ team, lang, t, isFavorite, onToggle }) {
+  const teamName = lang === "fa"
+    ? team.name_fa || team.name_en || team.team_name || ""
+    : team.name_en || team.name_fa || team.team_name || "";
+
   return (
     <article className="team-card">
       <div className="team-card-main">
         <span className="team-emoji">{team.emoji}</span>
         <div>
-          <h3>{lang === "fa" ? team.name_fa : team.name_en}</h3>
+          <h3>{teamName}</h3>
           <small>{isFavorite ? t.favoriteTeams : t.chooseFavorite}</small>
         </div>
       </div>
@@ -1400,6 +1469,7 @@ function App() {
   const initialTelegramUser = window.Telegram?.WebApp?.initDataUnsafe?.user || null;
   const [lang, setLang] = useState("fa");
   const [activeTab, setActiveTab] = useState("home");
+  const [selectedCompetitionKey, setSelectedCompetitionKey] = useState("worldcup2026");
   const [telegramUser] = useState(initialTelegramUser);
   const [isUserSaved, setIsUserSaved] = useState(false);
 
@@ -1429,11 +1499,20 @@ function App() {
   const [loadingEventsId, setLoadingEventsId] = useState(null);
   const [scoreChangedMatchIds, setScoreChangedMatchIds] = useState(() => new Set());
   const scoreChangeTimeouts = useRef(new Map());
+  const eventRequestController = useRef(null);
   const predictionMutationVersion = useRef(0);
   const predictionSaveRequests = useRef(new Map());
 
   const t = translations[lang];
   const telegramId = telegramUser?.id;
+  const selectedCompetition = COMPETITIONS[selectedCompetitionKey] || COMPETITIONS.worldcup2026;
+  const selectedCompetitionLabel = selectedCompetition.labels[lang] || selectedCompetition.labels.en;
+  const heroEyebrow = selectedCompetitionKey === "worldcup2026"
+    ? t.worldCup
+    : selectedCompetitionLabel;
+  const heroSubtitle = selectedCompetitionKey === "worldcup2026"
+    ? t.subtitle
+    : selectedCompetition.subtitles[lang] || selectedCompetition.subtitles.en;
 
   const favoriteTeamIds = useMemo(
     () => new Set(favoriteTeams.map((team) => String(team.id))),
@@ -1468,8 +1547,8 @@ function App() {
   const teamsByName = useMemo(() => {
     const lookup = new Map();
     teams.forEach((team) => {
-      lookup.set(team.name_en, team);
-      lookup.set(team.name_fa, team);
+      if (team.name_en) lookup.set(team.name_en, team);
+      if (team.name_fa) lookup.set(team.name_fa, team);
     });
     return lookup;
   }, [teams]);
@@ -1511,17 +1590,30 @@ function App() {
 
   const futureMatches = useMemo(
     () => matches
+      .map((match, originalIndex) => ({ match, originalIndex }))
       .filter(
-        (match) =>
+        ({ match }) =>
           match.is_finished !== true &&
           match.is_live !== true &&
           !isFinishedMatch(match) &&
           !isLiveMatch(match) &&
           isFutureMatchStatus(match),
       )
-      .map((match) => ({ match, kickoffTime: getKickoffTime(match) }))
-      .filter(({ kickoffTime }) => Number.isFinite(kickoffTime) && kickoffTime > currentTime)
-      .sort((first, second) => first.kickoffTime - second.kickoffTime)
+      .map(({ match, originalIndex }) => ({ match, originalIndex, kickoffTime: getKickoffTime(match) }))
+      .filter(({ match, kickoffTime }) => (
+        Number.isFinite(kickoffTime)
+          ? kickoffTime > currentTime
+          : normalizeMatchStatus(match) === "upcoming"
+      ))
+      .sort((first, second) => {
+        const firstHasKickoff = Number.isFinite(first.kickoffTime);
+        const secondHasKickoff = Number.isFinite(second.kickoffTime);
+
+        if (firstHasKickoff && secondHasKickoff) return first.kickoffTime - second.kickoffTime;
+        if (firstHasKickoff) return -1;
+        if (secondHasKickoff) return 1;
+        return first.originalIndex - second.originalIndex;
+      })
       .map(({ match }) => match),
     [currentTime, matches],
   );
@@ -1595,6 +1687,7 @@ function App() {
 
   useEffect(() => {
     const scoreTimeouts = scoreChangeTimeouts.current;
+    const requestController = new AbortController();
 
     const markScoreChanged = (matchId) => {
       setScoreChangedMatchIds((currentIds) => new Set(currentIds).add(matchId));
@@ -1654,7 +1747,7 @@ function App() {
         setMatchesError("");
       }
 
-      return fetch(`${API_BASE_URL}/matches`)
+      return fetch(selectedCompetition.dataUrls.matches, { signal: requestController.signal })
         .then((response) => {
           if (!response.ok) {
             throw new Error(`Matches request failed: ${response.status}`);
@@ -1671,11 +1764,12 @@ function App() {
           setMatchesError("");
         })
         .catch((error) => {
+          if (error.name === "AbortError") return;
           console.error("Failed to load matches:", error);
           setMatchesError(t.matchesError);
         })
         .finally(() => {
-          if (isInitialLoad) setIsLoadingMatches(false);
+          if (isInitialLoad && !requestController.signal.aborted) setIsLoadingMatches(false);
         });
     };
 
@@ -1683,21 +1777,30 @@ function App() {
     const matchRefresh = window.setInterval(loadMatches, 30000);
 
     return () => {
+      requestController.abort();
       window.clearInterval(matchRefresh);
       scoreTimeouts.forEach((timeout) => window.clearTimeout(timeout));
       scoreTimeouts.clear();
     };
-  }, [t.matchesError]);
+  }, [selectedCompetition, t.matchesError]);
 
   useEffect(() => {
-    fetch(`${API_BASE_URL}/teams`)
+    const requestController = new AbortController();
+
+    fetch(selectedCompetition.dataUrls.teams, { signal: requestController.signal })
       .then((response) => {
         if (!response.ok) throw new Error(`Teams request failed: ${response.status}`);
         return response.json();
       })
       .then((data) => setTeams(Array.isArray(data.teams) ? data.teams : []))
-      .catch((error) => console.error("Failed to load teams:", error));
-  }, []);
+      .catch((error) => {
+        if (error.name !== "AbortError") console.error("Failed to load teams:", error);
+      });
+
+    return () => requestController.abort();
+  }, [selectedCompetition]);
+
+  useEffect(() => () => eventRequestController.current?.abort(), []);
 
   useEffect(() => {
     if (!telegramId) return;
@@ -1791,7 +1894,32 @@ function App() {
     setLang((current) => (current === "fa" ? "en" : "fa"));
   };
 
+  const handleCompetitionChange = (competitionKey) => {
+    if (!COMPETITIONS[competitionKey] || competitionKey === selectedCompetitionKey) return;
+
+    eventRequestController.current?.abort();
+    eventRequestController.current = null;
+    scoreChangeTimeouts.current.forEach((timeout) => window.clearTimeout(timeout));
+    scoreChangeTimeouts.current.clear();
+    setMatches([]);
+    setTeams([]);
+    setIsLoadingMatches(true);
+    setMatchesError("");
+    setSelectedMatchId(null);
+    setMatchEventsById({});
+    setEventUnavailableMatchIds(new Set());
+    setEventFailedMatchIds(new Set());
+    setLoadingEventsId(null);
+    setScoreChangedMatchIds(new Set());
+    setReminderMessage("");
+    setFavoriteMessage("");
+    if (activeTab === "favorites") setActiveTab("home");
+    setSelectedCompetitionKey(competitionKey);
+  };
+
   const addFavoriteTeam = (team) => {
+    if (!selectedCompetition.supportsFavorites) return;
+
     if (!telegramId) {
       setFavoriteMessage(t.unavailable);
       return;
@@ -1822,6 +1950,8 @@ function App() {
   };
 
   const removeFavoriteTeam = (team) => {
+    if (!selectedCompetition.supportsFavorites) return;
+
     if (!telegramId) {
       setFavoriteMessage(t.unavailable);
       return;
@@ -1865,6 +1995,8 @@ function App() {
   };
 
   const addReminder = (matchId) => {
+    if (!selectedCompetition.supportsReminders) return;
+
     if (!telegramId) {
       setReminderMessage(t.unavailable);
       return;
@@ -1893,6 +2025,8 @@ function App() {
   };
 
   const removeReminder = (matchId) => {
+    if (!selectedCompetition.supportsReminders) return;
+
     if (!telegramId) {
       setReminderMessage(t.unavailable);
       return;
@@ -1929,6 +2063,8 @@ function App() {
   };
 
   const saveMatchPrediction = (matchId, prediction) => {
+    if (!selectedCompetition.supportsPredictions) return;
+
     const matchKey = String(matchId);
 
     if (!telegramId) {
@@ -2039,7 +2175,15 @@ function App() {
       return nextIds;
     });
     setLoadingEventsId(match.id);
-    fetch(`${API_BASE_URL}/match/${match.id}/events`)
+    eventRequestController.current?.abort();
+    const requestController = new AbortController();
+    eventRequestController.current = requestController;
+
+    const eventsUrl = selectedCompetition.supportsScopedEvents
+      ? selectedCompetition.dataUrls.events(match.id)
+      : COMPETITIONS.worldcup2026.dataUrls.events(match.id);
+
+    fetch(eventsUrl, { signal: requestController.signal })
       .then((response) => {
         if (!response.ok) {
           throw new Error(`Events request failed: ${response.status}`);
@@ -2054,15 +2198,21 @@ function App() {
           [match.id]: events,
         }));
 
-        if (events.length === 0 && (data.warning || data.error)) {
+        if (events.length === 0 && (data.warning || data.error || data.warnings?.length)) {
           setEventUnavailableMatchIds((currentIds) => new Set(currentIds).add(match.id));
         }
       })
       .catch((error) => {
+        if (error.name === "AbortError") return;
         console.error("Failed to load match events:", error);
         setEventFailedMatchIds((currentIds) => new Set(currentIds).add(match.id));
       })
-      .finally(() => setLoadingEventsId(null));
+      .finally(() => {
+        if (eventRequestController.current === requestController) {
+          eventRequestController.current = null;
+          setLoadingEventsId(null);
+        }
+      });
   };
 
   const getMatchTeams = (match) => ({
@@ -2088,6 +2238,17 @@ function App() {
   const otherLiveMatches = filterHeroFromList(liveMatches, heroMatch);
   const upcomingWithoutHero = filterHeroFromList(upcomingOnlyMatches, heroMatch);
   const resultsWithoutHero = filterHeroFromList(pastOnlyMatches, heroMatch);
+  const heroStats = selectedCompetition.fixedStats
+    ? [
+        { key: "teams", value: selectedCompetition.fixedStats.teams, label: t.teams },
+        { key: "matches", value: selectedCompetition.fixedStats.matches, label: t.matches },
+        { key: "cities", value: selectedCompetition.fixedStats.cities, label: t.cities },
+      ]
+    : [
+        { key: "teams", value: teams.length, label: t.teams },
+        { key: "matches", value: matches.length, label: t.matches },
+      ];
+  const formatStatValue = (value) => (lang === "fa" ? toPersianDigits(value) : String(value));
 
   let homeSectionMatches = [];
   let homeSectionTitle = t.homeNextMatches;
@@ -2139,6 +2300,9 @@ function App() {
         predictionSaveFailed={predictionErrorMatchIds.has(matchKey)}
         predictionForceLocked={predictionLockedMatchIds.has(matchKey)}
         {...options}
+        showReminder={selectedCompetition.supportsReminders && (options.showReminder ?? true)}
+        showFavorites={selectedCompetition.supportsFavorites}
+        showPredictions={selectedCompetition.supportsPredictions}
       />
     );
   };
@@ -2147,35 +2311,42 @@ function App() {
     <main className={`app ${lang}`} dir={t.dir}>
       <section className="hero">
         <div className="hero-toolbar">
-          <BrandLogo />
+          <BrandLogo key={selectedCompetition.competitionKey} competition={selectedCompetition} lang={lang} />
           <div className="brand-copy">
             <strong>{t.title}</strong>
-            <small>{t.brandLabel}</small>
+            <small>{selectedCompetitionKey === "worldcup2026" ? t.brandLabel : selectedCompetitionLabel}</small>
           </div>
           <button className="lang-btn" onClick={toggleLang}>
             {t.langButton}
           </button>
         </div>
 
-        <div>
-          <p className="eyebrow">{t.worldCup}</p>
-          <h1>{t.title}</h1>
-          <p className="subtitle">{t.subtitle}</p>
+        <div className="competition-selector" aria-label={t.competitionSelector} role="group">
+          {Object.values(COMPETITIONS).map((competition) => (
+            <button
+              className={selectedCompetitionKey === competition.competitionKey ? "active" : ""}
+              key={competition.competitionKey}
+              onClick={() => handleCompetitionChange(competition.competitionKey)}
+              type="button"
+            >
+              {competition.labels[lang] || competition.labels.en}
+            </button>
+          ))}
         </div>
 
-        <div className="stats-row">
-          <div>
-            <strong>{lang === "fa" ? "۴۸" : "48"}</strong>
-            <span>{t.teams}</span>
-          </div>
-          <div>
-            <strong>{lang === "fa" ? "۱۰۴" : "104"}</strong>
-            <span>{t.matches}</span>
-          </div>
-          <div>
-            <strong>{lang === "fa" ? "۱۶" : "16"}</strong>
-            <span>{t.cities}</span>
-          </div>
+        <div>
+          <p className="eyebrow">{heroEyebrow}</p>
+          <h1>{t.title}</h1>
+          <p className="subtitle">{heroSubtitle}</p>
+        </div>
+
+        <div className={`stats-row ${heroStats.length === 2 ? "two-stats" : ""}`}>
+          {heroStats.map((stat) => (
+            <div key={stat.key}>
+              <strong>{formatStatValue(stat.value)}</strong>
+              <span>{stat.label}</span>
+            </div>
+          ))}
         </div>
 
         {activeTab === "home" && (
@@ -2209,10 +2380,12 @@ function App() {
               <span>🏁</span>
               {t.pastMatches}
             </button>
-            <button onClick={() => setActiveTab("favorites")}>
-              <span>⭐</span>
-              {t.favorites}
-            </button>
+            {selectedCompetition.supportsFavorites && (
+              <button onClick={() => setActiveTab("favorites")}>
+                <span>⭐</span>
+                {t.favorites}
+              </button>
+            )}
           </section>
 
           <section className="section">
@@ -2327,7 +2500,7 @@ function App() {
         </section>
       )}
 
-      {activeTab === "favorites" && (
+      {activeTab === "favorites" && selectedCompetition.supportsFavorites && (
         <section className="section">
           <div className="section-header">
             <h2>{t.favoriteTeams}</h2>
@@ -2348,12 +2521,14 @@ function App() {
                 <div className="profile-item-text">
                   <strong>{getTeamDisplayName(team)}</strong>
                 </div>
-                <button
-                  className="chip-btn profile-remove-btn"
-                  onClick={() => removeFavoriteTeam(team)}
-                >
-                  {t.removeFavorite}
-                </button>
+                {selectedCompetition.supportsFavorites && (
+                  <button
+                    className="chip-btn profile-remove-btn"
+                    onClick={() => removeFavoriteTeam(team)}
+                  >
+                    {t.removeFavorite}
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -2441,12 +2616,14 @@ function App() {
                   <div className="profile-item-text">
                     <strong>{getTeamDisplayName(team)}</strong>
                   </div>
-                  <button
-                    className="chip-btn profile-remove-btn"
-                    onClick={() => removeFavoriteTeam(team)}
-                  >
-                    {t.removeFavorite}
-                  </button>
+                  {selectedCompetition.supportsFavorites && (
+                    <button
+                      className="chip-btn profile-remove-btn"
+                      onClick={() => removeFavoriteTeam(team)}
+                    >
+                      {t.removeFavorite}
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -2475,12 +2652,14 @@ function App() {
                       </strong>
                       <small>{reminderDateTime.compact}</small>
                     </div>
-                    <button
-                      className="chip-btn profile-remove-btn"
-                      onClick={() => removeReminder(match.id)}
-                    >
-                      {t.cancelReminder}
-                    </button>
+                    {selectedCompetition.supportsReminders && (
+                      <button
+                        className="chip-btn profile-remove-btn"
+                        onClick={() => removeReminder(match.id)}
+                      >
+                        {t.cancelReminder}
+                      </button>
+                    )}
                   </div>
                 );
               })}
