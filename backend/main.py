@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from scheduler_service import start_scheduler
 from data import NEWS
+from aggregate_match_service import aggregate_matches_by_date
 from competition_service import get_competition, get_competitions
 from competition_data_service import (
     get_match_events_for_season,
@@ -305,6 +306,14 @@ def get_matches(status: str = Query("all")):
         "status": status,
         "matches": matches,
     }
+
+
+@api.get("/matches/by-date")
+def get_matches_by_date(date: str = Query(...)):
+    try:
+        return aggregate_matches_by_date(date)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 @api.get("/worldcup/summary")
