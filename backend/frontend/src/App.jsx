@@ -28,6 +28,7 @@ import WorldCupArchive from "./components/worldcup/WorldCupArchive.jsx";
 import HomePage from "./pages/HomePage.jsx";
 import LivePage from "./pages/LivePage.jsx";
 import CompetitionsPage from "./pages/CompetitionsPage.jsx";
+import NewsPage from "./pages/NewsPage.jsx";
 import {
   getMatchScoreSignature,
   isFinishedMatch,
@@ -914,13 +915,7 @@ function App() {
 
       {activeTab === "competitions" && <CompetitionsPage lang={lang} t={t} />}
 
-      {activeTab === "news" && (
-        <section className="section temporary-page-shell">
-          <span aria-hidden="true">▤</span>
-          <h2>{t.news}</h2>
-          <p>{t.comingSoon}</p>
-        </section>
-      )}
+      {activeTab === "news" && <NewsPage lang={lang} t={t} />}
 
       {activeTab === "predictions" && (
         <section className="section temporary-page-shell">
