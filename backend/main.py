@@ -12,8 +12,10 @@ from aggregate_match_service import aggregate_matches_by_date
 from competition_service import get_competition, get_competitions
 from competition_data_service import (
     CompetitionDataProviderError,
+    CompetitionGroupsProviderError,
     CompetitionStandingsUnavailableError,
     get_match_events_for_season,
+    get_groups_for_season,
     get_match_live_for_season,
     get_matches_for_competition,
     get_matches_for_season,
@@ -245,6 +247,38 @@ def get_competition_season_standings(competition_key: str, season_key: str):
         "season_key": season["season_key"],
         "count": len(standings),
         "standings": standings,
+    }
+
+
+@api.get("/competitions/{competition_key}/seasons/{season_key}/groups")
+def get_competition_season_groups(competition_key: str, season_key: str):
+    competition = get_competition(competition_key)
+    if not competition:
+        raise HTTPException(status_code=404, detail="Competition not found")
+
+    season = get_season(competition_key, season_key)
+    if not season:
+        raise HTTPException(status_code=404, detail="Season not found")
+
+    if competition.get("format") != "group_knockout":
+        raise HTTPException(status_code=501, detail="Competition groups not supported")
+
+    if competition.get("supports_groups") is not True:
+        raise HTTPException(status_code=501, detail="Competition groups not available")
+
+    try:
+        groups = get_groups_for_season(competition_key, season_key)
+    except CompetitionGroupsProviderError as error:
+        raise HTTPException(status_code=502, detail="Groups provider unavailable") from error
+
+    if groups is None:
+        raise HTTPException(status_code=501, detail="Competition groups data source not configured")
+
+    return {
+        "competition_key": competition["competition_key"],
+        "season_key": season["season_key"],
+        "count": len(groups),
+        "groups": groups,
     }
 
 

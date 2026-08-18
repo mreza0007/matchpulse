@@ -32,6 +32,12 @@ VARZESH_EVENT_TYPES = {
 TEHRAN_TZ = ZoneInfo("Asia/Tehran")
 UTC_TZ = ZoneInfo("UTC")
 SOURCE_TZ = ZoneInfo(os.getenv("WORLDCUP_SOURCE_TIMEZONE", "America/New_York"))
+
+
+class WorldCupGroupsProviderError(RuntimeError):
+    pass
+
+
 STADIUM_TIMEZONES = {
     "1": "America/Mexico_City",
     "2": "America/Mexico_City",
@@ -2360,6 +2366,87 @@ def fetch_teams_from_wrapper():
             teams.append(normalized_team)
 
     return teams
+
+
+def normalize_group_stat(value, field_name):
+    if isinstance(value, bool):
+        raise WorldCupGroupsProviderError(f"Invalid groups {field_name}")
+
+    try:
+        return int(value)
+    except (TypeError, ValueError) as error:
+        raise WorldCupGroupsProviderError(f"Invalid groups {field_name}") from error
+
+
+def normalize_group_row(row, team_lookup):
+    if not isinstance(row, dict):
+        raise WorldCupGroupsProviderError("Invalid groups row")
+
+    team_id = str(row.get("team_id") or "").strip()
+    if not team_id:
+        raise WorldCupGroupsProviderError("Invalid groups team identity")
+
+    normalized = {
+        "team_id": team_id,
+        "played": normalize_group_stat(row.get("mp"), "played"),
+        "wins": normalize_group_stat(row.get("w"), "wins"),
+        "draws": normalize_group_stat(row.get("d"), "draws"),
+        "losses": normalize_group_stat(row.get("l"), "losses"),
+        "goals_for": normalize_group_stat(row.get("gf"), "goals_for"),
+        "goals_against": normalize_group_stat(row.get("ga"), "goals_against"),
+        "goal_difference": normalize_group_stat(row.get("gd"), "goal_difference"),
+        "points": normalize_group_stat(row.get("pts"), "points"),
+    }
+    team = team_lookup.get(team_id)
+    if team:
+        normalized.update({
+            "team_fa": team.get("name_fa") or "",
+            "team_en": team.get("name_en") or "",
+            "logo": team.get("flag") or team.get("flag_url") or "",
+        })
+
+    return normalized
+
+
+def normalize_groups_payload(groups_payload, teams_payload):
+    raw_groups = groups_payload.get("groups") if isinstance(groups_payload, dict) else None
+    raw_teams = teams_payload.get("teams") if isinstance(teams_payload, dict) else None
+    if not isinstance(raw_groups, list) or not isinstance(raw_teams, list):
+        raise WorldCupGroupsProviderError("Invalid groups payload")
+
+    team_lookup = {
+        str(team.get("id") or "").strip(): team
+        for team in raw_teams
+        if isinstance(team, dict) and str(team.get("id") or "").strip()
+    }
+    groups = []
+    for group in raw_groups:
+        if not isinstance(group, dict):
+            raise WorldCupGroupsProviderError("Invalid group")
+
+        group_key = str(group.get("name") or group.get("group") or "").strip()
+        rows = group.get("teams")
+        if not group_key or not isinstance(rows, list):
+            raise WorldCupGroupsProviderError("Invalid group")
+
+        groups.append({
+            "group_key": group_key,
+            "standings": [normalize_group_row(row, team_lookup) for row in rows],
+        })
+
+    return groups
+
+
+def get_groups_from_worldcup_wrapper():
+    groups_payload, groups_error = fetch_json_with_error("/get/groups")
+    if groups_error:
+        raise WorldCupGroupsProviderError("Groups provider unavailable")
+
+    teams_payload, teams_error = fetch_json_with_error("/get/teams")
+    if teams_error:
+        raise WorldCupGroupsProviderError("Groups provider unavailable")
+
+    return normalize_groups_payload(groups_payload, teams_payload)
 
 
 def fetch_match_live_from_wrapper(match_id):

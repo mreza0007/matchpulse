@@ -2,6 +2,10 @@ from functools import partial
 
 from real_data_service import get_real_matches, get_real_teams
 from season_service import get_default_season
+from services.worldcup_adapter import (
+    WorldCupGroupsProviderError,
+    get_groups_from_worldcup_wrapper,
+)
 from services.generic_football_adapter import (
     GenericFootballProviderError,
     GenericStandingsUnavailableError,
@@ -21,6 +25,10 @@ class CompetitionStandingsUnavailableError(RuntimeError):
     pass
 
 
+class CompetitionGroupsProviderError(RuntimeError):
+    pass
+
+
 def normalize_competition_key(value):
     return str(value or "").strip().lower()
 
@@ -33,6 +41,7 @@ COMPETITION_DATA_PROVIDERS = {
     "worldcup2026": {
         "seasons": {
             "2026": {
+                "groups": get_groups_from_worldcup_wrapper,
                 "matches": get_real_matches,
                 "teams": get_real_teams,
             },
@@ -104,6 +113,17 @@ def get_standings_for_season(competition_key, season_key):
         raise CompetitionStandingsUnavailableError() from error
     except GenericFootballProviderError as error:
         raise CompetitionDataProviderError() from error
+
+
+def get_groups_for_season(competition_key, season_key):
+    season_provider = get_season_provider(competition_key, season_key)
+    if not season_provider or not season_provider.get("groups"):
+        return None
+
+    try:
+        return season_provider["groups"]()
+    except WorldCupGroupsProviderError as error:
+        raise CompetitionGroupsProviderError() from error
 
 
 def get_match_live_for_season(competition_key, season_key, match_id):
