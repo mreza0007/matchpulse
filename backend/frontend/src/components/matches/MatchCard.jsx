@@ -52,6 +52,7 @@ export default function MatchCard({
   predictionForceLocked = false,
   showFavorites = true,
   showPredictions = true,
+  showEvents = true,
 }) {
   const matchStatus = getMatchStatus(match, lang, t);
   const isLive = isLiveMatch(match);
@@ -64,7 +65,7 @@ export default function MatchCard({
   const awayName = getLocalizedTeamName(match, "away", lang);
   const shouldShowScoreFallback = !matchScore && ["finished", "pending_result"].includes(matchStatus.key);
   const matchDateTime = formatTehranMatchDateTime(match, lang);
-  const canViewEvents = canShowEvents(match);
+  const canViewEvents = showEvents && canShowEvents(match);
   const predictionLocked = predictionForceLocked || isPredictionLocked(match);
   const showPrediction = isFutureMatchStatus(match) || Boolean(prediction);
   const stopCardClick = (event) => event.stopPropagation();

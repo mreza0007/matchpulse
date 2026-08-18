@@ -128,3 +128,27 @@ export function formatCountdown(milliseconds, lang) {
   );
 }
 
+export function getTehranCalendarDates(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Tehran",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const year = Number(values.year);
+  const month = Number(values.month);
+  const day = Number(values.day);
+
+  const formatOffset = (offset) => {
+    const date = new Date(Date.UTC(year, month - 1, day + offset));
+    return [date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate()]
+      .map((value, index) => String(value).padStart(index === 0 ? 4 : 2, "0"))
+      .join("-");
+  };
+
+  return {
+    today: formatOffset(0),
+    tomorrow: formatOffset(1),
+  };
+}

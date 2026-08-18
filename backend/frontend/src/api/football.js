@@ -20,3 +20,7 @@ export function fetchMatchEvents(competition, matchId, options) {
 
   return request(eventsUrl, options);
 }
+
+export function fetchMatchesByDate(date, options) {
+  return request(`${API_BASE_URL}/matches/by-date?date=${encodeURIComponent(date)}`, options);
+}

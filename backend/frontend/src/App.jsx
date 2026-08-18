@@ -21,13 +21,12 @@ import {
   saveTelegramUser,
 } from "./api/user.js";
 import MatchCard from "./components/matches/MatchCard.jsx";
-import HeroMatchCard from "./components/matches/HeroMatchCard.jsx";
+import AppHeader from "./components/layout/AppHeader.jsx";
+import BottomNav from "./components/layout/BottomNav.jsx";
 import TeamFlag from "./components/teams/TeamFlag.jsx";
 import WorldCupArchive from "./components/worldcup/WorldCupArchive.jsx";
+import HomePage from "./pages/HomePage.jsx";
 import {
-  filterHeroFromList,
-  getHeroMatch,
-  getHeroMode,
   getMatchScoreSignature,
   isFinishedMatch,
   isFutureMatchStatus,
@@ -813,16 +812,6 @@ function App() {
     ? `@${telegramUser.username}`
     : t.noUsername;
 
-  const heroMatch = getHeroMatch(liveMatches, upcomingOnlyMatches, pastOnlyMatches);
-  const heroMode = getHeroMode(heroMatch);
-  const heroLabel = {
-    live: t.heroLive,
-    upcoming: t.heroUpcoming,
-    result: t.heroResult,
-  }[heroMode] || t.nextMatch;
-  const otherLiveMatches = filterHeroFromList(liveMatches, heroMatch);
-  const upcomingWithoutHero = filterHeroFromList(upcomingOnlyMatches, heroMatch);
-  const resultsWithoutHero = filterHeroFromList(pastOnlyMatches, heroMatch);
   const heroStats = selectedCompetition.fixedStats
     ? [
         { key: "teams", value: selectedCompetition.fixedStats.teams, label: t.teams },
@@ -834,25 +823,6 @@ function App() {
         { key: "matches", value: matches.length, label: t.matches },
       ];
   const formatStatValue = (value) => (lang === "fa" ? toPersianDigits(value) : String(value));
-
-  let homeSectionMatches = [];
-  let homeSectionTitle = t.homeNextMatches;
-  let homeSectionTab = "upcoming";
-  let homeEmptyMessage = t.noUpcomingMatches;
-
-  if (heroMode === "live" && otherLiveMatches.length > 0) {
-    homeSectionMatches = otherLiveMatches;
-    homeSectionTitle = t.otherLiveMatches;
-    homeSectionTab = "live";
-    homeEmptyMessage = t.noLiveMatches;
-  } else if (heroMode === "live" || heroMode === "upcoming") {
-    homeSectionMatches = upcomingWithoutHero.slice(0, 3);
-  } else if (heroMode === "result") {
-    homeSectionMatches = resultsWithoutHero.slice(0, 3);
-    homeSectionTitle = t.latestResults;
-    homeSectionTab = "past";
-    homeEmptyMessage = t.noPastMatches;
-  }
 
   const renderMatchCard = (match, options = {}) => {
     const { homeTeam, awayTeam } = getMatchTeams(match);
@@ -894,108 +864,54 @@ function App() {
 
   return (
     <main className={`app ${lang}`} dir={t.dir}>
-      <section className="hero">
-        <div className="hero-toolbar">
-          <BrandLogo key={selectedCompetition.competitionKey} competition={selectedCompetition} lang={lang} />
-          <div className="brand-copy">
-            <strong>{t.title}</strong>
-            <small>{selectedCompetitionKey === "worldcup2026" ? t.brandLabel : selectedCompetitionLabel}</small>
+      <AppHeader
+        langButton={t.langButton}
+        onProfileOpen={() => setActiveTab("profile")}
+        onToggleLanguage={toggleLang}
+        telegramUser={telegramUser}
+      />
+
+      {!['home', 'competitions', 'news', 'predictions'].includes(activeTab) && (
+        <section className="hero legacy-hero">
+          <div className="hero-toolbar">
+            <BrandLogo key={selectedCompetition.competitionKey} competition={selectedCompetition} lang={lang} />
+            <div className="brand-copy">
+              <strong>{t.title}</strong>
+              <small>{selectedCompetitionKey === "worldcup2026" ? t.brandLabel : selectedCompetitionLabel}</small>
+            </div>
           </div>
-          <button className="lang-btn" onClick={toggleLang}>
-            {t.langButton}
-          </button>
-        </div>
 
-        <div className="competition-selector" aria-label={t.competitionSelector} role="group">
-          {Object.values(COMPETITIONS).map((competition) => (
-            <button
-              className={selectedCompetitionKey === competition.competitionKey ? "active" : ""}
-              key={competition.competitionKey}
-              onClick={() => handleCompetitionChange(competition.competitionKey)}
-              type="button"
-            >
-              {competition.labels[lang] || competition.labels.en}
-            </button>
-          ))}
-        </div>
-
-        <div>
-          <p className="eyebrow">{heroEyebrow}</p>
-          <h1>{t.title}</h1>
-          <p className="subtitle">{heroSubtitle}</p>
-        </div>
-
-        <div className={`stats-row ${heroStats.length === 2 ? "two-stats" : ""}`}>
-          {heroStats.map((stat) => (
-            <div key={stat.key}>
-              <strong>{formatStatValue(stat.value)}</strong>
-              <span>{stat.label}</span>
-            </div>
-          ))}
-        </div>
-
-        {activeTab === "home" && (
-          heroMatch ? (
-            <HeroMatchCard key={`${heroMatch.id}-${heroMode}`} label={heroLabel} mode={heroMode} match={heroMatch} lang={lang} t={t}>
-              {renderMatchCard(heroMatch, {
-                variant: "hero",
-                showReminder: heroMode === "upcoming",
-              })}
-            </HeroMatchCard>
-          ) : (
-            <div className="hero-card">
-              <strong>{isLoadingMatches ? t.loadingMatches : matchesError || t.noUpcomingMatches}</strong>
-            </div>
-          )
-        )}
-      </section>
-
-      {activeTab === "home" && (
-        <>
-          <section className="quick-actions">
-            <button onClick={() => setActiveTab("live")}>
-              <span>●</span>
-              {t.liveMatches}
-            </button>
-            <button onClick={() => setActiveTab("upcoming")}>
-              <span>⚽</span>
-              {t.nextMatches}
-            </button>
-            <button onClick={() => setActiveTab("past")}>
-              <span>🏁</span>
-              {t.pastMatches}
-            </button>
-            {selectedCompetition.supportsFavorites && (
-              <button onClick={() => setActiveTab("favorites")}>
-                <span>⭐</span>
-                {t.favorites}
+          <div className="competition-selector" aria-label={t.competitionSelector} role="group">
+            {Object.values(COMPETITIONS).map((competition) => (
+              <button
+                className={selectedCompetitionKey === competition.competitionKey ? "active" : ""}
+                key={competition.competitionKey}
+                onClick={() => handleCompetitionChange(competition.competitionKey)}
+                type="button"
+              >
+                {competition.labels[lang] || competition.labels.en}
               </button>
-            )}
-          </section>
+            ))}
+          </div>
 
-          <section className="section">
-            <div className="section-header">
-              <h2>{homeSectionTitle}</h2>
-              <span onClick={() => setActiveTab(homeSectionTab)}>{t.viewAll}</span>
-            </div>
+          <div>
+            <p className="eyebrow">{heroEyebrow}</p>
+            <h1>{t.title}</h1>
+            <p className="subtitle">{heroSubtitle}</p>
+          </div>
 
-            <div className="matches">
-              {isLoadingMatches && <p>{t.loadingMatches}</p>}
-              {!isLoadingMatches && matchesError && <p>{matchesError}</p>}
-              {!isLoadingMatches && !matchesError && homeSectionMatches.length === 0 && (
-                <p>{homeEmptyMessage}</p>
-              )}
-              {homeSectionMatches.map((match) =>
-                renderMatchCard(match, { showReminder: isFutureMatchStatus(match) }),
-              )}
-            </div>
-
-            {(reminderMessage || favoriteMessage) && (
-              <p className="status-message">{reminderMessage || favoriteMessage}</p>
-            )}
-          </section>
-        </>
+          <div className={`stats-row ${heroStats.length === 2 ? "two-stats" : ""}`}>
+            {heroStats.map((stat) => (
+              <div key={stat.key}>
+                <strong>{formatStatValue(stat.value)}</strong>
+                <span>{stat.label}</span>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
+
+      {activeTab === "home" && <HomePage lang={lang} t={t} />}
 
       {activeTab === "live" && (
         <section className="section">
@@ -1011,6 +927,30 @@ function App() {
             )}
             {liveMatches.map((match) => renderMatchCard(match, { showReminder: false }))}
           </div>
+        </section>
+      )}
+
+      {activeTab === "competitions" && (
+        <section className="section temporary-page-shell">
+          <span aria-hidden="true">⚽</span>
+          <h2>{t.competitionsPage}</h2>
+          <p>{t.comingSoon}</p>
+        </section>
+      )}
+
+      {activeTab === "news" && (
+        <section className="section temporary-page-shell">
+          <span aria-hidden="true">▤</span>
+          <h2>{t.news}</h2>
+          <p>{t.comingSoon}</p>
+        </section>
+      )}
+
+      {activeTab === "predictions" && (
+        <section className="section temporary-page-shell">
+          <span aria-hidden="true">✓</span>
+          <h2>{t.predictionsPage}</h2>
+          <p>{t.comingSoon}</p>
         </section>
       )}
 
@@ -1253,49 +1193,7 @@ function App() {
         </section>
       )}
 
-      <nav className="bottom-nav">
-        <button
-          className={activeTab === "home" ? "active" : ""}
-          onClick={() => setActiveTab("home")}
-        >
-          🏠 {t.home}
-        </button>
-
-        <button
-          className={activeTab === "live" ? "active" : ""}
-          onClick={() => setActiveTab("live")}
-        >
-          ● {t.live}
-        </button>
-
-        <button
-          className={activeTab === "upcoming" ? "active" : ""}
-          onClick={() => setActiveTab("upcoming")}
-        >
-          ⚽ {t.upcoming}
-        </button>
-
-        <button
-          className={activeTab === "past" ? "active" : ""}
-          onClick={() => setActiveTab("past")}
-        >
-          🏁 {t.past}
-        </button>
-
-        <button
-          className={activeTab === "worldcup" ? "active" : ""}
-          onClick={() => setActiveTab("worldcup")}
-        >
-          🏆 {t.worldcupArchiveTab}
-        </button>
-
-        <button
-          className={activeTab === "profile" ? "active" : ""}
-          onClick={() => setActiveTab("profile")}
-        >
-          👤 {t.profile}
-        </button>
-      </nav>
+      <BottomNav activeTab={activeTab} onChange={setActiveTab} />
     </main>
   );
 }
