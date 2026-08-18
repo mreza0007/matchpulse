@@ -17,6 +17,18 @@ export function fetchCompetitionTeams(competition, options) {
   return request(competition.dataUrls.teams, options);
 }
 
+export function fetchCompetitionSeasonMatches(competitionKey, seasonKey, options) {
+  const competition = encodeURIComponent(competitionKey);
+  const season = encodeURIComponent(seasonKey);
+  return request(`${API_BASE_URL}/competitions/${competition}/seasons/${season}/matches?status=all`, options);
+}
+
+export function fetchCompetitionSeasonTeams(competitionKey, seasonKey, options) {
+  const competition = encodeURIComponent(competitionKey);
+  const season = encodeURIComponent(seasonKey);
+  return request(`${API_BASE_URL}/competitions/${competition}/seasons/${season}/teams`, options);
+}
+
 export function fetchMatchEvents(competition, matchId, options) {
   const eventsUrl = competition.supportsScopedEvents
     ? competition.dataUrls.events(matchId)

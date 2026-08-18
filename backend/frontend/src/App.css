@@ -3044,6 +3044,81 @@ h1 {
   font-size: 20px;
 }
 
+.competition-tabs {
+  display: flex;
+  gap: 5px;
+  padding: 4px;
+  overflow-x: auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+  scrollbar-width: none;
+}
+
+.competition-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.competition-tabs button {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding-inline: 13px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--theme-muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.competition-tabs button.active {
+  background: rgba(var(--theme-accent-rgb), 0.14);
+  color: var(--theme-accent-soft);
+}
+
+.competition-tab-content,
+.competition-tab-skeleton,
+.competition-overview-content,
+.competition-preview-section,
+.competition-preview-matches,
+.competition-match-groups {
+  display: grid;
+  gap: 12px;
+}
+
+.competition-preview-section h2 {
+  margin: 0;
+  color: var(--theme-muted);
+  font-size: 13px;
+}
+
+.competition-team-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.competition-team-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 54px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.competition-team-row strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .match-status-summary {
   display: inline-flex;
   align-items: center;
