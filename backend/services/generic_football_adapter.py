@@ -9,6 +9,14 @@ DEFAULT_WRAPPER_URL = "http://127.0.0.1:3060"
 DEFAULT_TIMEOUT_SECONDS = 10
 
 
+class GenericFootballProviderError(RuntimeError):
+    pass
+
+
+class GenericStandingsUnavailableError(GenericFootballProviderError):
+    pass
+
+
 def get_wrapper_base_url():
     return os.getenv("GENERIC_FOOTBALL_WRAPPER_URL", DEFAULT_WRAPPER_URL).strip()
 
@@ -142,6 +150,32 @@ def normalize_team(team):
     }
 
 
+def normalize_standing(standing):
+    if not isinstance(standing, dict):
+        raise GenericFootballProviderError("Invalid standings row")
+
+    confirmed_fields = (
+        "rank",
+        "team_id",
+        "provider",
+        "external_team_id",
+        "team_fa",
+        "team_en",
+        "logo",
+        "played",
+        "wins",
+        "draws",
+        "losses",
+        "points",
+        "goals_for",
+        "goals_against",
+        "goal_difference",
+        "qualification_color",
+        "has_live_match",
+    )
+    return {field: standing.get(field) for field in confirmed_fields}
+
+
 def status_matches_filter(requested_status, match_status):
     requested = str(requested_status or "all").strip().lower()
     if requested == "past":
@@ -173,6 +207,31 @@ def get_season_teams(competition_key, season_key):
         if normalized is not None:
             teams.append(normalized)
     return teams
+
+
+def get_season_standings(competition_key, season_key):
+    competition = quote(str(competition_key), safe="")
+    season = quote(str(season_key), safe="")
+    url = build_url(f"/competitions/{competition}/seasons/{season}/standings")
+    if not url:
+        raise GenericFootballProviderError("Wrapper URL is not configured")
+
+    try:
+        response = requests.get(url, timeout=get_timeout_seconds())
+        if response.status_code == 501:
+            raise GenericStandingsUnavailableError("Standings not available")
+        response.raise_for_status()
+        payload = response.json()
+    except GenericStandingsUnavailableError:
+        raise
+    except (requests.RequestException, ValueError) as error:
+        raise GenericFootballProviderError("Standings provider unavailable") from error
+
+    raw_standings = payload.get("standings") if isinstance(payload, dict) else None
+    if not isinstance(raw_standings, list):
+        raise GenericFootballProviderError("Invalid standings payload")
+
+    return [normalize_standing(standing) for standing in raw_standings]
 
 
 def get_match_live(match_id):

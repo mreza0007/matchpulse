@@ -3,11 +3,22 @@ from functools import partial
 from real_data_service import get_real_matches, get_real_teams
 from season_service import get_default_season
 from services.generic_football_adapter import (
+    GenericFootballProviderError,
+    GenericStandingsUnavailableError,
     get_match_events as get_generic_match_events,
     get_match_live as get_generic_match_live,
     get_season_matches as get_generic_season_matches,
+    get_season_standings as get_generic_season_standings,
     get_season_teams as get_generic_season_teams,
 )
+
+
+class CompetitionDataProviderError(RuntimeError):
+    pass
+
+
+class CompetitionStandingsUnavailableError(RuntimeError):
+    pass
 
 
 def normalize_competition_key(value):
@@ -31,6 +42,7 @@ COMPETITION_DATA_PROVIDERS = {
         "seasons": {
             "2026-2027": {
                 "matches": partial(get_generic_season_matches, "premier_league", "2026-2027"),
+                "standings": partial(get_generic_season_standings, "premier_league", "2026-2027"),
                 "teams": partial(get_generic_season_teams, "premier_league", "2026-2027"),
                 "live": get_generic_match_live,
                 "events": get_generic_match_events,
@@ -79,6 +91,19 @@ def get_teams_for_season(competition_key, season_key):
         return None
 
     return season_provider["teams"]()
+
+
+def get_standings_for_season(competition_key, season_key):
+    season_provider = get_season_provider(competition_key, season_key)
+    if not season_provider or not season_provider.get("standings"):
+        return None
+
+    try:
+        return season_provider["standings"]()
+    except GenericStandingsUnavailableError as error:
+        raise CompetitionStandingsUnavailableError() from error
+    except GenericFootballProviderError as error:
+        raise CompetitionDataProviderError() from error
 
 
 def get_match_live_for_season(competition_key, season_key, match_id):

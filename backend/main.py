@@ -11,10 +11,13 @@ from data import NEWS
 from aggregate_match_service import aggregate_matches_by_date
 from competition_service import get_competition, get_competitions
 from competition_data_service import (
+    CompetitionDataProviderError,
+    CompetitionStandingsUnavailableError,
     get_match_events_for_season,
     get_match_live_for_season,
     get_matches_for_competition,
     get_matches_for_season,
+    get_standings_for_season,
     get_teams_for_competition,
     get_teams_for_season,
 )
@@ -211,6 +214,37 @@ def get_competition_season_teams(competition_key: str, season_key: str):
     return {
         "count": len(teams),
         "teams": teams,
+    }
+
+
+@api.get("/competitions/{competition_key}/seasons/{season_key}/standings")
+def get_competition_season_standings(competition_key: str, season_key: str):
+    competition = get_competition(competition_key)
+    if not competition:
+        raise HTTPException(status_code=404, detail="Competition not found")
+
+    season = get_season(competition_key, season_key)
+    if not season:
+        raise HTTPException(status_code=404, detail="Season not found")
+
+    if competition.get("supports_standings") is not True:
+        raise HTTPException(status_code=501, detail="Competition standings not supported")
+
+    try:
+        standings = get_standings_for_season(competition_key, season_key)
+    except CompetitionStandingsUnavailableError as error:
+        raise HTTPException(status_code=501, detail="Competition standings not available") from error
+    except CompetitionDataProviderError as error:
+        raise HTTPException(status_code=502, detail="Standings provider unavailable") from error
+
+    if standings is None:
+        raise HTTPException(status_code=501, detail="Competition standings data source not configured")
+
+    return {
+        "competition_key": competition["competition_key"],
+        "season_key": season["season_key"],
+        "count": len(standings),
+        "standings": standings,
     }
 
 
