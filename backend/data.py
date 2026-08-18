@@ -57,6 +57,9 @@ NEWS = [
         "tag_en": "Schedule",
         "title_fa": "برنامه رسمی مسابقات جام جهانی ۲۰۲۶ از سوی فیفا منتشر شده است",
         "title_en": "FIFA has published the official World Cup 2026 match schedule",
+        "category": "world",
+        "related_team_ids": [],
+        "related_competition_keys": ["worldcup2026"],
     },
     {
         "id": 2,
@@ -64,5 +67,8 @@ NEWS = [
         "tag_en": "Teams",
         "title_fa": "صفحه رسمی تیم‌های حاضر در جام جهانی ۲۰۲۶ در سایت فیفا در دسترس است",
         "title_en": "The official World Cup 2026 teams page is available on FIFA.com",
+        "category": "world",
+        "related_team_ids": [],
+        "related_competition_keys": ["worldcup2026"],
     },
 ]

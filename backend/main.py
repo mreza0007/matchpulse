@@ -27,6 +27,7 @@ from competition_data_service import (
     get_teams_for_season,
 )
 from season_service import get_season, get_seasons
+from news_service import filter_news
 from real_data_service import get_match_events, get_real_matches, get_real_teams, get_worldcup_summary
 from services.worldcup_adapter import get_match_live_from_worldcup_wrapper, start_worldcup_wrapper_poller
 
@@ -434,10 +435,24 @@ def get_match_live(match_id: int):
 
 
 @api.get("/news")
-def get_news():
+def get_news(
+    category: str | None = Query(None),
+    competition_key: str | None = Query(None),
+    team_id: str | None = Query(None),
+):
+    try:
+        news = filter_news(
+            NEWS,
+            category=category,
+            competition_key=competition_key,
+            team_id=team_id,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
     return {
-        "count": len(NEWS),
-        "news": NEWS,
+        "count": len(news),
+        "news": news,
     }
 
 
