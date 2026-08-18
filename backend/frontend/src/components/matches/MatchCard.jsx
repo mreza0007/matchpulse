@@ -53,6 +53,7 @@ export default function MatchCard({
   showFavorites = true,
   showPredictions = true,
   showEvents = true,
+  showStatusSummary = false,
 }) {
   const matchStatus = getMatchStatus(match, lang, t);
   const isLive = isLiveMatch(match);
@@ -108,7 +109,24 @@ export default function MatchCard({
           <span className="match-date">{matchDateTime.date}</span>
           <span className="match-stage">{match.stage_label || match.stage}</span>
         </div>
-        {isLive && variant !== "hero" && <span className="match-status live live-pulse">{matchStatus.label}</span>}
+        {isLive && variant !== "hero" && !showStatusSummary && (
+          <span className="match-status live live-pulse">{matchStatus.label}</span>
+        )}
+        {showStatusSummary && matchStatus.key === "live" && (
+          <span className="match-status-summary">
+            <span className="match-status live live-pulse">{t.statusLive}</span>
+            {matchStatus.label !== t.statusLive && <span className="match-phase">{matchStatus.label}</span>}
+          </span>
+        )}
+        {showStatusSummary && matchStatus.key === "finished" && (
+          <span className="match-status finished">{matchStatus.label}</span>
+        )}
+        {showStatusSummary && matchStatus.key === "pending_result" && (
+          <span className="match-status finished">{matchStatus.label}</span>
+        )}
+        {showStatusSummary && matchStatus.key === "upcoming" && (
+          <span className="match-status upcoming-time">{matchDateTime.time}</span>
+        )}
       </div>
 
       <div className="match-score-block">

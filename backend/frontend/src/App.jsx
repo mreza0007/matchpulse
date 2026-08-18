@@ -26,6 +26,7 @@ import BottomNav from "./components/layout/BottomNav.jsx";
 import TeamFlag from "./components/teams/TeamFlag.jsx";
 import WorldCupArchive from "./components/worldcup/WorldCupArchive.jsx";
 import HomePage from "./pages/HomePage.jsx";
+import LivePage from "./pages/LivePage.jsx";
 import {
   getMatchScoreSignature,
   isFinishedMatch,
@@ -207,11 +208,6 @@ function App() {
     emoji: match[`${side}_flag`] || "\u26bd",
     flag: match[`${side}_flag`] || "\u26bd",
   });
-
-  const liveMatches = useMemo(
-    () => matches.filter((match) => isLiveMatch(match)),
-    [matches],
-  );
 
   const futureMatches = useMemo(
     () => matches
@@ -871,7 +867,7 @@ function App() {
         telegramUser={telegramUser}
       />
 
-      {!['home', 'competitions', 'news', 'predictions'].includes(activeTab) && (
+      {!['home', 'live', 'competitions', 'news', 'predictions'].includes(activeTab) && (
         <section className="hero legacy-hero">
           <div className="hero-toolbar">
             <BrandLogo key={selectedCompetition.competitionKey} competition={selectedCompetition} lang={lang} />
@@ -913,22 +909,7 @@ function App() {
 
       {activeTab === "home" && <HomePage lang={lang} t={t} />}
 
-      {activeTab === "live" && (
-        <section className="section">
-          <div className="section-header">
-            <h2>{t.liveMatches}</h2>
-          </div>
-
-          <div className="matches">
-            {isLoadingMatches && <p>{t.loadingMatches}</p>}
-            {!isLoadingMatches && matchesError && <p>{matchesError}</p>}
-            {!isLoadingMatches && !matchesError && liveMatches.length === 0 && (
-              <p>{t.noLiveMatches}</p>
-            )}
-            {liveMatches.map((match) => renderMatchCard(match, { showReminder: false }))}
-          </div>
-        </section>
-      )}
+      {activeTab === "live" && <LivePage lang={lang} t={t} />}
 
       {activeTab === "competitions" && (
         <section className="section temporary-page-shell">

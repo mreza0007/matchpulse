@@ -148,6 +148,7 @@ export function getTehranCalendarDates(now = new Date()) {
   };
 
   return {
+    yesterday: formatOffset(-1),
     today: formatOffset(0),
     tomorrow: formatOffset(1),
   };
