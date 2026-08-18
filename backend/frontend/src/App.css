@@ -3204,6 +3204,40 @@ h1 {
   min-width: 360px;
 }
 
+.competition-groups-grid,
+.competition-group-card {
+  display: grid;
+  gap: 10px;
+}
+
+.competition-group-card {
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.competition-group-card h3 {
+  margin: 0;
+  font-size: 12px;
+}
+
+.group-table {
+  min-width: 330px;
+}
+
+.group-table th:first-child,
+.group-table td:first-child {
+  min-width: 150px;
+  text-align: start;
+}
+
+.group-table th:nth-child(2),
+.group-table td:nth-child(2) {
+  min-width: 0;
+  text-align: center;
+}
+
 .match-status-summary {
   display: inline-flex;
   align-items: center;

@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  fetchCompetitionGroups,
   fetchCompetitionStandings,
   fetchCompetitionSeasonMatches,
   fetchCompetitionSeasonTeams,
 } from "../api/football.js";
 import CompetitionLogo from "../components/competitions/CompetitionLogo.jsx";
 import CompetitionTabs from "../components/competitions/CompetitionTabs.jsx";
+import GroupTable from "../components/competitions/GroupTable.jsx";
 import StandingsTable from "../components/competitions/StandingsTable.jsx";
 import MatchCard from "../components/matches/MatchCard.jsx";
 import TeamFlag from "../components/teams/TeamFlag.jsx";
@@ -27,6 +29,7 @@ const FORMAT_TABS = {
 const INITIAL_MATCHES = { items: [], loading: true, loaded: false, failed: false };
 const INITIAL_TEAMS = { items: [], loading: false, loaded: false, failed: false };
 const INITIAL_STANDINGS = { items: [], loading: false, loaded: false, failed: false };
+const INITIAL_GROUPS = { items: [], loading: false, loaded: false, failed: false };
 
 function TabSkeleton() {
   return (
@@ -93,6 +96,7 @@ function teamName(team, lang) {
 
 export default function CompetitionPage({ competition, lang, onBack, t }) {
   const isLeague = competition.format === "league";
+  const isGroupKnockout = competition.format === "group_knockout";
   const tabs = FORMAT_TABS[competition.format] || [];
   const [activeTab, setActiveTab] = useState("overview");
   const [matches, setMatches] = useState(INITIAL_MATCHES);
@@ -101,11 +105,17 @@ export default function CompetitionPage({ competition, lang, onBack, t }) {
     ...INITIAL_STANDINGS,
     loading: isLeague,
   }));
+  const [groups, setGroups] = useState(() => ({
+    ...INITIAL_GROUPS,
+    loading: isGroupKnockout,
+  }));
   const [matchesRetryVersion, setMatchesRetryVersion] = useState(0);
   const [teamsRetryVersion, setTeamsRetryVersion] = useState(0);
   const [standingsRetryVersion, setStandingsRetryVersion] = useState(0);
+  const [groupsRetryVersion, setGroupsRetryVersion] = useState(0);
   const [teamsRequested, setTeamsRequested] = useState(false);
   const [standingsRequested, setStandingsRequested] = useState(isLeague);
+  const [groupsRequested, setGroupsRequested] = useState(isGroupKnockout);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -203,6 +213,43 @@ export default function CompetitionPage({ competition, lang, onBack, t }) {
     standingsRetryVersion,
   ]);
 
+  useEffect(() => {
+    if (!isGroupKnockout || !groupsRequested) return undefined;
+    const controller = new AbortController();
+
+    fetchCompetitionGroups(
+      competition.competition_key,
+      competition.season_key,
+      { signal: controller.signal },
+    )
+      .then((response) => {
+        if (!response.ok) throw new Error(`Competition groups request failed: ${response.status}`);
+        return response.json();
+      })
+      .then((payload) => {
+        if (controller.signal.aborted) return;
+        setGroups({
+          items: Array.isArray(payload?.groups) ? payload.groups : [],
+          loading: false,
+          loaded: true,
+          failed: false,
+        });
+      })
+      .catch((error) => {
+        if (error.name === "AbortError") return;
+        console.error("Failed to load competition groups:", error);
+        setGroups({ items: [], loading: false, loaded: false, failed: true });
+      });
+
+    return () => controller.abort();
+  }, [
+    competition.competition_key,
+    competition.season_key,
+    groupsRequested,
+    groupsRetryVersion,
+    isGroupKnockout,
+  ]);
+
   const matchGroups = useMemo(
     () => groupMatchesByDate(matches.items, lang),
     [lang, matches.items],
@@ -226,6 +273,10 @@ export default function CompetitionPage({ competition, lang, onBack, t }) {
       setStandings((current) => ({ ...current, loading: true }));
       setStandingsRequested(true);
     }
+    if (tab === "groups" && isGroupKnockout && !groupsRequested) {
+      setGroups((current) => ({ ...current, loading: true }));
+      setGroupsRequested(true);
+    }
   };
   const retryMatches = () => {
     setMatches((current) => ({ ...current, loading: true, failed: false }));
@@ -238,6 +289,10 @@ export default function CompetitionPage({ competition, lang, onBack, t }) {
   const retryStandings = () => {
     setStandings((current) => ({ ...current, loading: true, failed: false }));
     setStandingsRetryVersion((version) => version + 1);
+  };
+  const retryGroups = () => {
+    setGroups((current) => ({ ...current, loading: true, failed: false }));
+    setGroupsRetryVersion((version) => version + 1);
   };
 
   const renderOverviewMatches = () => {
@@ -291,10 +346,40 @@ export default function CompetitionPage({ competition, lang, onBack, t }) {
     );
   };
 
+  const renderGroupsPreview = () => {
+    if (!isGroupKnockout) return null;
+
+    return (
+      <section className="competition-preview-section">
+        <h2>{t.groupsPreview}</h2>
+        {groups.loading ? (
+          <StandingsSkeleton preview />
+        ) : groups.failed ? (
+          <RetryState message={t.groupsLoadError} onRetry={retryGroups} t={t} />
+        ) : groups.loaded && groups.items.length === 0 ? (
+          <div className="home-empty-state">{t.groupsEmpty}</div>
+        ) : (
+          <div className="competition-groups-grid">
+            {groups.items.slice(0, 2).map((group, index) => (
+              <GroupTable
+                group={group}
+                key={group.group_key || index}
+                lang={lang}
+                preview
+                t={t}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+    );
+  };
+
   const renderOverview = () => (
     <div className="competition-overview-content">
       {renderOverviewMatches()}
       {renderStandingsPreview()}
+      {renderGroupsPreview()}
     </div>
   );
 
@@ -352,10 +437,30 @@ export default function CompetitionPage({ competition, lang, onBack, t }) {
     return <StandingsTable lang={lang} rows={standings.items} t={t} />;
   };
 
+  const renderGroups = () => {
+    if (groups.loading) return <StandingsSkeleton />;
+    if (groups.failed) return <RetryState message={t.groupsLoadError} onRetry={retryGroups} t={t} />;
+    if (groups.loaded && groups.items.length === 0) return <div className="home-empty-state">{t.groupsEmpty}</div>;
+
+    return (
+      <div className="competition-groups-grid">
+        {groups.items.map((group, index) => (
+          <GroupTable
+            group={group}
+            key={group.group_key || index}
+            lang={lang}
+            t={t}
+          />
+        ))}
+      </div>
+    );
+  };
+
   const renderActiveTab = () => {
     if (activeTab === "overview") return renderOverview();
     if (activeTab === "matches") return renderMatches();
     if (activeTab === "standings") return renderStandings();
+    if (activeTab === "groups") return renderGroups();
     if (activeTab === "teams") return renderTeams();
     return <div className="home-empty-state">{t.competitionDataUnavailable}</div>;
   };
