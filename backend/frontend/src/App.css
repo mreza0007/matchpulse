@@ -3238,6 +3238,37 @@ h1 {
   text-align: center;
 }
 
+.competition-knockout-rounds,
+.competition-knockout-round,
+.competition-knockout-matches {
+  display: grid;
+  gap: 12px;
+}
+
+.competition-knockout-round {
+  padding-block: 4px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.competition-knockout-round:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.competition-knockout-round h2 {
+  margin: 0;
+  color: var(--theme-accent-soft);
+  font-size: 14px;
+}
+
+.competition-loading-state {
+  display: grid;
+  gap: 8px;
+  color: var(--theme-muted);
+  font-size: 11px;
+  text-align: center;
+}
+
 .match-status-summary {
   display: inline-flex;
   align-items: center;

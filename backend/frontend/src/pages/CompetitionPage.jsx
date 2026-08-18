@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   fetchCompetitionGroups,
+  fetchCompetitionKnockout,
   fetchCompetitionStandings,
   fetchCompetitionSeasonMatches,
   fetchCompetitionSeasonTeams,
@@ -8,6 +9,7 @@ import {
 import CompetitionLogo from "../components/competitions/CompetitionLogo.jsx";
 import CompetitionTabs from "../components/competitions/CompetitionTabs.jsx";
 import GroupTable from "../components/competitions/GroupTable.jsx";
+import KnockoutRound from "../components/competitions/KnockoutRound.jsx";
 import StandingsTable from "../components/competitions/StandingsTable.jsx";
 import MatchCard from "../components/matches/MatchCard.jsx";
 import TeamFlag from "../components/teams/TeamFlag.jsx";
@@ -30,6 +32,7 @@ const INITIAL_MATCHES = { items: [], loading: true, loaded: false, failed: false
 const INITIAL_TEAMS = { items: [], loading: false, loaded: false, failed: false };
 const INITIAL_STANDINGS = { items: [], loading: false, loaded: false, failed: false };
 const INITIAL_GROUPS = { items: [], loading: false, loaded: false, failed: false };
+const INITIAL_KNOCKOUT = { items: [], loading: false, loaded: false, failed: false };
 
 function TabSkeleton() {
   return (
@@ -97,6 +100,7 @@ function teamName(team, lang) {
 export default function CompetitionPage({ competition, lang, onBack, t }) {
   const isLeague = competition.format === "league";
   const isGroupKnockout = competition.format === "group_knockout";
+  const hasKnockoutTab = isGroupKnockout || competition.format === "knockout_only";
   const tabs = FORMAT_TABS[competition.format] || [];
   const [activeTab, setActiveTab] = useState("overview");
   const [matches, setMatches] = useState(INITIAL_MATCHES);
@@ -109,13 +113,16 @@ export default function CompetitionPage({ competition, lang, onBack, t }) {
     ...INITIAL_GROUPS,
     loading: isGroupKnockout,
   }));
+  const [knockout, setKnockout] = useState(INITIAL_KNOCKOUT);
   const [matchesRetryVersion, setMatchesRetryVersion] = useState(0);
   const [teamsRetryVersion, setTeamsRetryVersion] = useState(0);
   const [standingsRetryVersion, setStandingsRetryVersion] = useState(0);
   const [groupsRetryVersion, setGroupsRetryVersion] = useState(0);
+  const [knockoutRetryVersion, setKnockoutRetryVersion] = useState(0);
   const [teamsRequested, setTeamsRequested] = useState(false);
   const [standingsRequested, setStandingsRequested] = useState(isLeague);
   const [groupsRequested, setGroupsRequested] = useState(isGroupKnockout);
+  const [knockoutRequested, setKnockoutRequested] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -250,6 +257,46 @@ export default function CompetitionPage({ competition, lang, onBack, t }) {
     isGroupKnockout,
   ]);
 
+  useEffect(() => {
+    if (!hasKnockoutTab || !knockoutRequested) return undefined;
+    const controller = new AbortController();
+
+    fetchCompetitionKnockout(
+      competition.competition_key,
+      competition.season_key,
+      { signal: controller.signal },
+    )
+      .then((response) => {
+        if (!response.ok) throw new Error(`Competition knockout request failed: ${response.status}`);
+        return response.json();
+      })
+      .then((payload) => {
+        if (controller.signal.aborted) return;
+        const items = Array.isArray(payload?.rounds)
+          ? payload.rounds.map((round) => ({
+            ...round,
+            matches: Array.isArray(round?.matches)
+              ? round.matches.map(normalizeMatchPayload)
+              : [],
+          }))
+          : [];
+        setKnockout({ items, loading: false, loaded: true, failed: false });
+      })
+      .catch((error) => {
+        if (error.name === "AbortError") return;
+        console.error("Failed to load competition knockout rounds:", error);
+        setKnockout({ items: [], loading: false, loaded: false, failed: true });
+      });
+
+    return () => controller.abort();
+  }, [
+    competition.competition_key,
+    competition.season_key,
+    hasKnockoutTab,
+    knockoutRequested,
+    knockoutRetryVersion,
+  ]);
+
   const matchGroups = useMemo(
     () => groupMatchesByDate(matches.items, lang),
     [lang, matches.items],
@@ -277,6 +324,10 @@ export default function CompetitionPage({ competition, lang, onBack, t }) {
       setGroups((current) => ({ ...current, loading: true }));
       setGroupsRequested(true);
     }
+    if (tab === "knockout" && hasKnockoutTab && !knockoutRequested) {
+      setKnockout((current) => ({ ...current, loading: true }));
+      setKnockoutRequested(true);
+    }
   };
   const retryMatches = () => {
     setMatches((current) => ({ ...current, loading: true, failed: false }));
@@ -293,6 +344,10 @@ export default function CompetitionPage({ competition, lang, onBack, t }) {
   const retryGroups = () => {
     setGroups((current) => ({ ...current, loading: true, failed: false }));
     setGroupsRetryVersion((version) => version + 1);
+  };
+  const retryKnockout = () => {
+    setKnockout((current) => ({ ...current, loading: true, failed: false }));
+    setKnockoutRetryVersion((version) => version + 1);
   };
 
   const renderOverviewMatches = () => {
@@ -456,11 +511,39 @@ export default function CompetitionPage({ competition, lang, onBack, t }) {
     );
   };
 
+  const renderKnockout = () => {
+    if (knockout.loading) {
+      return (
+        <div className="competition-loading-state" role="status">
+          <span>{t.knockoutLoading}</span>
+          <TabSkeleton />
+        </div>
+      );
+    }
+    if (knockout.failed) return <RetryState message={t.knockoutLoadError} onRetry={retryKnockout} t={t} />;
+    if (knockout.loaded && knockout.items.length === 0) return <div className="home-empty-state">{t.knockoutEmpty}</div>;
+
+    return (
+      <div className="competition-knockout-rounds">
+        {knockout.items.map((round, index) => (
+          <KnockoutRound
+            competitionKey={competition.competition_key}
+            key={`${round.round_key || "round"}:${index}`}
+            lang={lang}
+            round={round}
+            t={t}
+          />
+        ))}
+      </div>
+    );
+  };
+
   const renderActiveTab = () => {
     if (activeTab === "overview") return renderOverview();
     if (activeTab === "matches") return renderMatches();
     if (activeTab === "standings") return renderStandings();
     if (activeTab === "groups") return renderGroups();
+    if (activeTab === "knockout") return renderKnockout();
     if (activeTab === "teams") return renderTeams();
     return <div className="home-empty-state">{t.competitionDataUnavailable}</div>;
   };
