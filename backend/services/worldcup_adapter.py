@@ -38,6 +38,14 @@ class WorldCupGroupsProviderError(RuntimeError):
     pass
 
 
+class WorldCupKnockoutProviderError(RuntimeError):
+    pass
+
+
+class WorldCupKnockoutUnavailableError(RuntimeError):
+    pass
+
+
 STADIUM_TIMEZONES = {
     "1": "America/Mexico_City",
     "2": "America/Mexico_City",
@@ -344,7 +352,38 @@ STAGE_LABELS = {
     "3rd": "Third",
     "final": "Final",
 }
+KNOCKOUT_STAGE_KEYS = frozenset(STAGE_LABELS)
 SCORING_EVENT_TYPES = {"goal", "own_goal", "penalty_goal"}
+
+
+def build_knockout_rounds(matches):
+    if not isinstance(matches, list) or not matches:
+        raise WorldCupKnockoutProviderError("Knockout match source unavailable")
+
+    rounds = []
+    rounds_by_key = {}
+    for match in matches:
+        if not isinstance(match, dict):
+            raise WorldCupKnockoutProviderError("Invalid knockout match payload")
+
+        round_key = str(match.get("stage") or "").strip().lower()
+        if round_key == "3rd":
+            round_key = "third"
+        if round_key not in KNOCKOUT_STAGE_KEYS:
+            continue
+
+        round_item = rounds_by_key.get(round_key)
+        if round_item is None:
+            round_item = {"round_key": round_key, "matches": []}
+            rounds_by_key[round_key] = round_item
+            rounds.append(round_item)
+
+        round_item["matches"].append(dict(match))
+
+    if not rounds:
+        raise WorldCupKnockoutUnavailableError("Knockout rounds not available")
+
+    return rounds
 
 
 def resolve_stage(match):

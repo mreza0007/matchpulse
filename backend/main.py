@@ -13,9 +13,12 @@ from competition_service import get_competition, get_competitions
 from competition_data_service import (
     CompetitionDataProviderError,
     CompetitionGroupsProviderError,
+    CompetitionKnockoutProviderError,
+    CompetitionKnockoutUnavailableError,
     CompetitionStandingsUnavailableError,
     get_match_events_for_season,
     get_groups_for_season,
+    get_knockout_for_season,
     get_match_live_for_season,
     get_matches_for_competition,
     get_matches_for_season,
@@ -279,6 +282,36 @@ def get_competition_season_groups(competition_key: str, season_key: str):
         "season_key": season["season_key"],
         "count": len(groups),
         "groups": groups,
+    }
+
+
+@api.get("/competitions/{competition_key}/seasons/{season_key}/knockout")
+def get_competition_season_knockout(competition_key: str, season_key: str):
+    competition = get_competition(competition_key)
+    if not competition:
+        raise HTTPException(status_code=404, detail="Competition not found")
+
+    season = get_season(competition_key, season_key)
+    if not season:
+        raise HTTPException(status_code=404, detail="Season not found")
+
+    if competition.get("supports_knockout") is not True:
+        raise HTTPException(status_code=501, detail="Competition knockout not supported")
+
+    try:
+        rounds = get_knockout_for_season(competition_key, season_key)
+    except CompetitionKnockoutUnavailableError as error:
+        raise HTTPException(status_code=501, detail="Competition knockout not available") from error
+    except CompetitionKnockoutProviderError as error:
+        raise HTTPException(status_code=502, detail="Knockout provider unavailable") from error
+
+    if rounds is None:
+        raise HTTPException(status_code=501, detail="Competition knockout data source not configured")
+
+    return {
+        "competition_key": competition["competition_key"],
+        "season_key": season["season_key"],
+        "rounds": rounds,
     }
 
 

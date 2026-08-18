@@ -7,6 +7,7 @@ from services.worldcup_adapter import (
     is_trusted_score_override,
     normalize_match_status,
     visible_match_result,
+    build_knockout_rounds,
 )
 from db_service import get_all_match_score_overrides_from_db
 import time
@@ -492,3 +493,7 @@ def get_real_teams():
         }
         for index, name in enumerate(sorted(team_names), start=1)
     ]
+
+
+def get_worldcup_knockout_rounds():
+    return build_knockout_rounds(get_real_matches(status="all"))

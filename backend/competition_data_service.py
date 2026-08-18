@@ -1,9 +1,11 @@
 from functools import partial
 
-from real_data_service import get_real_matches, get_real_teams
+from real_data_service import get_real_matches, get_real_teams, get_worldcup_knockout_rounds
 from season_service import get_default_season
 from services.worldcup_adapter import (
     WorldCupGroupsProviderError,
+    WorldCupKnockoutProviderError,
+    WorldCupKnockoutUnavailableError,
     get_groups_from_worldcup_wrapper,
 )
 from services.generic_football_adapter import (
@@ -29,6 +31,14 @@ class CompetitionGroupsProviderError(RuntimeError):
     pass
 
 
+class CompetitionKnockoutProviderError(RuntimeError):
+    pass
+
+
+class CompetitionKnockoutUnavailableError(RuntimeError):
+    pass
+
+
 def normalize_competition_key(value):
     return str(value or "").strip().lower()
 
@@ -42,6 +52,7 @@ COMPETITION_DATA_PROVIDERS = {
         "seasons": {
             "2026": {
                 "groups": get_groups_from_worldcup_wrapper,
+                "knockout": get_worldcup_knockout_rounds,
                 "matches": get_real_matches,
                 "teams": get_real_teams,
             },
@@ -124,6 +135,19 @@ def get_groups_for_season(competition_key, season_key):
         return season_provider["groups"]()
     except WorldCupGroupsProviderError as error:
         raise CompetitionGroupsProviderError() from error
+
+
+def get_knockout_for_season(competition_key, season_key):
+    season_provider = get_season_provider(competition_key, season_key)
+    if not season_provider or not season_provider.get("knockout"):
+        return None
+
+    try:
+        return season_provider["knockout"]()
+    except WorldCupKnockoutUnavailableError as error:
+        raise CompetitionKnockoutUnavailableError() from error
+    except WorldCupKnockoutProviderError as error:
+        raise CompetitionKnockoutProviderError() from error
 
 
 def get_match_live_for_season(competition_key, season_key, match_id):
