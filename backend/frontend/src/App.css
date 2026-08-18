@@ -3119,6 +3119,91 @@ h1 {
   white-space: nowrap;
 }
 
+.standings-skeleton {
+  display: grid;
+  gap: 7px;
+}
+
+.standings-skeleton > span {
+  height: 38px;
+  border-radius: 9px;
+  background: linear-gradient(100deg, rgba(255, 255, 255, 0.035) 20%, rgba(255, 255, 255, 0.085) 40%, rgba(255, 255, 255, 0.035) 60%);
+  background-size: 220% 100%;
+  animation: homeSkeleton 1.4s ease-in-out infinite;
+}
+
+.standings-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.standings-table {
+  width: 100%;
+  min-width: 420px;
+  border-collapse: collapse;
+  color: var(--theme-text);
+  font-size: 11px;
+  text-align: center;
+}
+
+.standings-table th,
+.standings-table td {
+  height: 42px;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  white-space: nowrap;
+}
+
+.standings-table th {
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--theme-muted);
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.standings-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.standings-table th:nth-child(2),
+.standings-table td:nth-child(2) {
+  min-width: 150px;
+  text-align: start;
+}
+
+.standings-team {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+}
+
+.standings-team strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.standings-rank,
+.standings-points {
+  font-weight: 800;
+}
+
+.standings-live-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--theme-live);
+  box-shadow: 0 0 7px rgba(var(--theme-live-rgb), 0.55);
+}
+
+.standings-table-scroll.preview .standings-table {
+  min-width: 360px;
+}
+
 .match-status-summary {
   display: inline-flex;
   align-items: center;

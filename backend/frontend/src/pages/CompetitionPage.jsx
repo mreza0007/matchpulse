@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  fetchCompetitionStandings,
   fetchCompetitionSeasonMatches,
   fetchCompetitionSeasonTeams,
 } from "../api/football.js";
 import CompetitionLogo from "../components/competitions/CompetitionLogo.jsx";
 import CompetitionTabs from "../components/competitions/CompetitionTabs.jsx";
+import StandingsTable from "../components/competitions/StandingsTable.jsx";
 import MatchCard from "../components/matches/MatchCard.jsx";
 import TeamFlag from "../components/teams/TeamFlag.jsx";
 import { getKickoffTime, groupMatchesByDate } from "../utils/dates.js";
@@ -24,12 +26,22 @@ const FORMAT_TABS = {
 };
 const INITIAL_MATCHES = { items: [], loading: true, loaded: false, failed: false };
 const INITIAL_TEAMS = { items: [], loading: false, loaded: false, failed: false };
+const INITIAL_STANDINGS = { items: [], loading: false, loaded: false, failed: false };
 
 function TabSkeleton() {
   return (
     <div className="competition-tab-skeleton" aria-hidden="true">
       <div className="home-skeleton-card" />
       <div className="home-skeleton-card" />
+    </div>
+  );
+}
+
+function StandingsSkeleton({ preview = false }) {
+  const rowCount = preview ? 3 : 6;
+  return (
+    <div className="standings-skeleton" aria-hidden="true">
+      {Array.from({ length: rowCount }, (_, index) => <span key={index} />)}
     </div>
   );
 }
@@ -80,13 +92,20 @@ function teamName(team, lang) {
 }
 
 export default function CompetitionPage({ competition, lang, onBack, t }) {
+  const isLeague = competition.format === "league";
   const tabs = FORMAT_TABS[competition.format] || [];
   const [activeTab, setActiveTab] = useState("overview");
   const [matches, setMatches] = useState(INITIAL_MATCHES);
   const [teams, setTeams] = useState(INITIAL_TEAMS);
+  const [standings, setStandings] = useState(() => ({
+    ...INITIAL_STANDINGS,
+    loading: isLeague,
+  }));
   const [matchesRetryVersion, setMatchesRetryVersion] = useState(0);
   const [teamsRetryVersion, setTeamsRetryVersion] = useState(0);
+  const [standingsRetryVersion, setStandingsRetryVersion] = useState(0);
   const [teamsRequested, setTeamsRequested] = useState(false);
+  const [standingsRequested, setStandingsRequested] = useState(isLeague);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -147,6 +166,43 @@ export default function CompetitionPage({ competition, lang, onBack, t }) {
     return () => controller.abort();
   }, [competition.competition_key, competition.season_key, teamsRequested, teamsRetryVersion]);
 
+  useEffect(() => {
+    if (!isLeague || !standingsRequested) return undefined;
+    const controller = new AbortController();
+
+    fetchCompetitionStandings(
+      competition.competition_key,
+      competition.season_key,
+      { signal: controller.signal },
+    )
+      .then((response) => {
+        if (!response.ok) throw new Error(`Competition standings request failed: ${response.status}`);
+        return response.json();
+      })
+      .then((payload) => {
+        if (controller.signal.aborted) return;
+        setStandings({
+          items: Array.isArray(payload?.standings) ? payload.standings : [],
+          loading: false,
+          loaded: true,
+          failed: false,
+        });
+      })
+      .catch((error) => {
+        if (error.name === "AbortError") return;
+        console.error("Failed to load competition standings:", error);
+        setStandings({ items: [], loading: false, loaded: false, failed: true });
+      });
+
+    return () => controller.abort();
+  }, [
+    competition.competition_key,
+    competition.season_key,
+    isLeague,
+    standingsRequested,
+    standingsRetryVersion,
+  ]);
+
   const matchGroups = useMemo(
     () => groupMatchesByDate(matches.items, lang),
     [lang, matches.items],
@@ -166,6 +222,10 @@ export default function CompetitionPage({ competition, lang, onBack, t }) {
       setTeams((current) => ({ ...current, loading: true }));
       setTeamsRequested(true);
     }
+    if (tab === "standings" && isLeague && !standingsRequested) {
+      setStandings((current) => ({ ...current, loading: true }));
+      setStandingsRequested(true);
+    }
   };
   const retryMatches = () => {
     setMatches((current) => ({ ...current, loading: true, failed: false }));
@@ -175,14 +235,18 @@ export default function CompetitionPage({ competition, lang, onBack, t }) {
     setTeams((current) => ({ ...current, loading: true, failed: false }));
     setTeamsRetryVersion((version) => version + 1);
   };
+  const retryStandings = () => {
+    setStandings((current) => ({ ...current, loading: true, failed: false }));
+    setStandingsRetryVersion((version) => version + 1);
+  };
 
-  const renderOverview = () => {
+  const renderOverviewMatches = () => {
     if (matches.loading) return <TabSkeleton />;
     if (matches.failed) return <RetryState message={t.competitionMatchesLoadError} onRetry={retryMatches} t={t} />;
     if (matches.items.length === 0) return <div className="home-empty-state">{t.competitionMatchesEmpty}</div>;
 
     return (
-      <div className="competition-overview-content">
+      <>
         {primaryMatch && (
           <section className="competition-preview-section">
             <h2>{isLiveMatch(primaryMatch) ? t.liveMatches : t.nextMatch}</h2>
@@ -204,9 +268,35 @@ export default function CompetitionPage({ competition, lang, onBack, t }) {
             </div>
           </section>
         )}
-      </div>
+      </>
     );
   };
+
+  const renderStandingsPreview = () => {
+    if (!isLeague) return null;
+
+    return (
+      <section className="competition-preview-section">
+        <h2>{t.standingsPreview}</h2>
+        {standings.loading ? (
+          <StandingsSkeleton preview />
+        ) : standings.failed ? (
+          <RetryState message={t.standingsLoadError} onRetry={retryStandings} t={t} />
+        ) : standings.loaded && standings.items.length === 0 ? (
+          <div className="home-empty-state">{t.standingsEmpty}</div>
+        ) : (
+          <StandingsTable lang={lang} preview rows={standings.items.slice(0, 5)} t={t} />
+        )}
+      </section>
+    );
+  };
+
+  const renderOverview = () => (
+    <div className="competition-overview-content">
+      {renderOverviewMatches()}
+      {renderStandingsPreview()}
+    </div>
+  );
 
   const renderMatches = () => {
     if (matches.loading) return <TabSkeleton />;
@@ -255,9 +345,17 @@ export default function CompetitionPage({ competition, lang, onBack, t }) {
     );
   };
 
+  const renderStandings = () => {
+    if (standings.loading) return <StandingsSkeleton />;
+    if (standings.failed) return <RetryState message={t.standingsLoadError} onRetry={retryStandings} t={t} />;
+    if (standings.loaded && standings.items.length === 0) return <div className="home-empty-state">{t.standingsEmpty}</div>;
+    return <StandingsTable lang={lang} rows={standings.items} t={t} />;
+  };
+
   const renderActiveTab = () => {
     if (activeTab === "overview") return renderOverview();
     if (activeTab === "matches") return renderMatches();
+    if (activeTab === "standings") return renderStandings();
     if (activeTab === "teams") return renderTeams();
     return <div className="home-empty-state">{t.competitionDataUnavailable}</div>;
   };

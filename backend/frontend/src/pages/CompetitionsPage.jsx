@@ -73,6 +73,7 @@ export default function CompetitionsPage({ lang, t }) {
     return (
       <CompetitionPage
         competition={selectedCompetition}
+        key={`${selectedCompetition.competition_key}:${selectedCompetition.season_key || ""}`}
         lang={lang}
         onBack={() => setSelectedCompetition(null)}
         t={t}
