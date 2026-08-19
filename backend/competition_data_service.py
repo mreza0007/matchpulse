@@ -119,6 +119,19 @@ def get_match_for_season(competition_key, season_key, match_id):
     )
 
 
+def get_prediction_matches_for_season(competition_key, season_key):
+    try:
+        matches = get_matches_for_season(competition_key, season_key, status="all")
+    except CompetitionDataProviderError:
+        raise
+    except Exception as error:
+        raise CompetitionDataProviderError() from error
+
+    if matches is None:
+        raise CompetitionDataProviderError()
+    return matches
+
+
 def get_teams_for_competition(competition_key):
     default_season = get_default_season(competition_key)
     if not default_season:

@@ -1,9 +1,6 @@
 import os
 import asyncio
-import math
 import sqlite3
-import time
-from datetime import datetime
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +17,7 @@ from competition_data_service import (
     CompetitionKnockoutUnavailableError,
     CompetitionStandingsUnavailableError,
     get_match_for_season,
+    get_prediction_matches_for_season,
     get_match_events_for_season,
     get_groups_for_season,
     get_knockout_for_season,
@@ -32,6 +30,7 @@ from competition_data_service import (
 )
 from season_service import get_season, get_seasons
 from news_service import filter_news
+from prediction_service import prediction_is_locked, prediction_is_predictable
 from real_data_service import get_match_events, get_real_matches, get_real_teams, get_worldcup_summary
 from services.worldcup_adapter import get_match_live_from_worldcup_wrapper, start_worldcup_wrapper_poller
 
@@ -231,6 +230,25 @@ def get_competition_season_teams(competition_key: str, season_key: str):
     return {
         "count": len(teams),
         "teams": teams,
+    }
+
+
+@api.get("/competitions/{competition_key}/seasons/{season_key}/predictable-matches")
+def get_competition_season_predictable_matches(competition_key: str, season_key: str):
+    competition_key, season_key = validate_prediction_scope(competition_key, season_key)
+    try:
+        matches = get_prediction_matches_for_season(competition_key, season_key)
+    except CompetitionDataProviderError as error:
+        raise HTTPException(
+            status_code=502, detail="Prediction match provider unavailable"
+        ) from error
+
+    predictable_matches = [match for match in matches if prediction_is_predictable(match)]
+    return {
+        "competition_key": competition_key,
+        "season_key": season_key,
+        "count": len(predictable_matches),
+        "matches": predictable_matches,
     }
 
 
@@ -583,48 +601,6 @@ def delete_reminder(data: ReminderData):
         "telegram_id": data.telegram_id,
         "reminders": reminders[data.telegram_id],
     }
-
-
-def trusted_prediction_kickoff(match):
-    for key in ("kickoff_ts", "kickoff_timestamp"):
-        value = match.get(key)
-        if value is None or isinstance(value, bool):
-            continue
-        try:
-            timestamp = float(value)
-        except (TypeError, ValueError):
-            continue
-        if math.isfinite(timestamp) and timestamp > 0:
-            return timestamp
-
-    for key in ("kickoff_utc", "kickoff_iso", "kickoff"):
-        value = match.get(key)
-        if not isinstance(value, str) or not value.strip():
-            continue
-        try:
-            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
-        except ValueError:
-            continue
-        if parsed.tzinfo is None or parsed.utcoffset() is None:
-            continue
-        return parsed.timestamp()
-
-    return None
-
-
-def prediction_is_locked(match, now_timestamp=None):
-    if not match:
-        return True
-    if match.get("is_live") is True or match.get("is_finished") is True:
-        return True
-    status = str(match.get("status") or "").strip().lower().replace("-", "_").replace(" ", "_")
-    if match.get("is_upcoming") is not True or status != "upcoming":
-        return True
-    kickoff_ts = trusted_prediction_kickoff(match)
-    if kickoff_ts is None:
-        return True
-    current_timestamp = time.time() if now_timestamp is None else now_timestamp
-    return kickoff_ts <= current_timestamp
 
 
 def normalize_prediction_request(data):

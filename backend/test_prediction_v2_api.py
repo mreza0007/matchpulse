@@ -16,6 +16,8 @@ from prediction_schema import ensure_prediction_v2_schema
 def future_match(match_id="42"):
     return {
         "id": match_id,
+        "home_en": "Home",
+        "away_en": "Away",
         "status": "upcoming",
         "is_upcoming": True,
         "is_live": False,
