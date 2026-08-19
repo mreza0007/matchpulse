@@ -2,6 +2,8 @@ import sqlite3
 import json
 from pathlib import Path
 
+from prediction_schema import ensure_prediction_v2_schema
+
 DB_PATH = Path(__file__).parent / "matchpulse.db"
 
 
@@ -72,20 +74,6 @@ def init_db():
 
     cursor.execute(
         """
-        CREATE TABLE IF NOT EXISTS predictions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            telegram_id INTEGER NOT NULL,
-            match_id INTEGER NOT NULL,
-            prediction TEXT NOT NULL CHECK(prediction IN ('home', 'draw', 'away')),
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(telegram_id, match_id)
-        )
-        """
-    )
-
-    cursor.execute(
-        """
         CREATE TABLE IF NOT EXISTS sent_notifications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             notification_key TEXT UNIQUE,
@@ -98,10 +86,16 @@ def init_db():
 
     ensure_live_notification_tables(conn)
 
+    prediction_schema = ensure_prediction_v2_schema(conn)
+
     conn.commit()
     conn.close()
 
     print("Database initialized...")
+    if prediction_schema == "legacy":
+        print("Legacy predictions schema detected; run the explicit prediction_v2 migration.")
+    elif prediction_schema == "unknown":
+        print("Unknown predictions schema detected; it was left untouched.")
 
 
 def ensure_column(cursor, table_name, column_name, column_type):
