@@ -1,6 +1,6 @@
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from fastapi.testclient import TestClient
 
@@ -99,7 +99,7 @@ class PredictableMatchesRouteTests(unittest.TestCase):
             },
         )
 
-    def test_scope_errors_and_disabled_premier_league_do_not_call_provider(self):
+    def test_scope_errors_do_not_call_provider(self):
         cases = [
             (
                 "/competitions/unknown/seasons/2026/predictable-matches",
@@ -111,11 +111,6 @@ class PredictableMatchesRouteTests(unittest.TestCase):
                 404,
                 "Season not found",
             ),
-            (
-                "/competitions/premier_league/seasons/2026-2027/predictable-matches",
-                501,
-                "Competition predictions not supported",
-            ),
         ]
         with patch("main.get_prediction_matches_for_season") as provider:
             for path, status, detail in cases:
@@ -124,6 +119,20 @@ class PredictableMatchesRouteTests(unittest.TestCase):
                     self.assertEqual(response.status_code, status)
                     self.assertEqual(response.json(), {"detail": detail})
         provider.assert_not_called()
+
+    def test_premier_league_route_returns_predictable_matches(self):
+        match = match_fixture(
+            "pl-future",
+            competition_key="premier_league",
+            season_key="2026-2027",
+        )
+        with patch("main.get_prediction_matches_for_season", return_value=[match]):
+            response = self.client.get(
+                "/competitions/premier_league/seasons/2026-2027/predictable-matches"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["matches"], [match])
 
     def test_provider_failure_is_sanitized(self):
         with patch(
@@ -159,12 +168,12 @@ class PredictableMatchesRouteTests(unittest.TestCase):
 
 
 class PremierLeagueReadinessTests(unittest.TestCase):
-    def test_premier_league_remains_prediction_disabled(self):
-        self.assertIs(get_competition("premier_league")["supports_predictions"], False)
+    def test_premier_league_predictions_are_enabled(self):
+        self.assertIs(get_competition("premier_league")["supports_predictions"], True)
 
-    def test_generic_finished_match_has_scores_but_no_canonical_result_contract(self):
-        match = generic_football_adapter.normalize_match(
-            {
+    def test_generic_finished_league_results_cover_home_draw_and_away(self):
+        for home_score, away_score, expected in ((2, 1, "home"), (1, 1, "draw"), (0, 3, "away")):
+            match = generic_football_adapter.normalize_match({
                 "id": "generic-finished",
                 "competition_key": "premier_league",
                 "season_key": "2026-2027",
@@ -172,31 +181,75 @@ class PremierLeagueReadinessTests(unittest.TestCase):
                 "kickoff_utc": "2026-08-01T12:00:00Z",
                 "home_name_fa": "تیم میزبان",
                 "away_name_fa": "تیم مهمان",
-                "home_score": 2,
-                "away_score": 1,
-            }
-        )
+                "home_score": home_score,
+                "away_score": away_score,
+            }, competition_format="league")
 
-        self.assertTrue(match["is_finished"])
-        self.assertEqual(match["score"], {"home": 2, "away": 1})
-        self.assertNotIn("result", match)
-        self.assertNotIn("score_source", match)
+            with self.subTest(home_score=home_score, away_score=away_score):
+                self.assertEqual(match["result"], expected)
+                self.assertEqual(match["result_source"], "final_score")
 
-    def test_generic_empty_and_provider_failure_are_currently_indistinguishable(self):
-        with patch("services.generic_football_adapter.fetch_json", return_value=None):
-            provider_failure = generic_football_adapter.get_season_matches(
-                "premier_league", "2026-2027"
+    def test_non_finished_or_invalid_scores_do_not_fabricate_result(self):
+        cases = [
+            ("upcoming", 2, 1, "league"),
+            ("live", 2, 1, "league"),
+            ("finished", None, 1, "league"),
+            ("finished", "2", 1, "league"),
+            ("finished", -1, 0, "league"),
+            ("finished", 1, 1, "group_knockout"),
+        ]
+        for status, home_score, away_score, competition_format in cases:
+            match = generic_football_adapter.normalize_match(
+                {"status": status, "home_score": home_score, "away_score": away_score},
+                competition_format=competition_format,
             )
-        with patch(
-            "services.generic_football_adapter.fetch_json",
-            return_value={"matches": []},
-        ):
+            with self.subTest(
+                status=status,
+                home_score=home_score,
+                away_score=away_score,
+                competition_format=competition_format,
+            ):
+                self.assertIsNone(match["result"])
+                self.assertIsNone(match["result_source"])
+
+    def test_valid_empty_is_distinct_from_provider_and_malformed_failures(self):
+        with patch("services.generic_football_adapter.fetch_json", return_value={"matches": []}):
             valid_empty = generic_football_adapter.get_season_matches(
                 "premier_league", "2026-2027"
             )
-
-        self.assertEqual(provider_failure, [])
         self.assertEqual(valid_empty, [])
+
+        for payload in (None, {}, {"matches": None}):
+            with self.subTest(payload=payload), patch(
+                "services.generic_football_adapter.fetch_json", return_value=payload
+            ):
+                with self.assertRaises(generic_football_adapter.GenericFootballProviderError):
+                    generic_football_adapter.get_season_matches(
+                        "premier_league", "2026-2027"
+                    )
+
+    def test_transport_http_and_json_failures_are_explicit(self):
+        failures = [
+            generic_football_adapter.requests.Timeout("timeout"),
+            generic_football_adapter.requests.HTTPError("non-2xx"),
+            ValueError("malformed json"),
+        ]
+        for failure in failures:
+            response = Mock()
+            if isinstance(failure, generic_football_adapter.requests.HTTPError):
+                response.raise_for_status.side_effect = failure
+            elif isinstance(failure, ValueError):
+                response.raise_for_status.return_value = None
+                response.json.side_effect = failure
+            with self.subTest(failure=type(failure).__name__), patch(
+                "services.generic_football_adapter.requests.get",
+                side_effect=failure if isinstance(failure, generic_football_adapter.requests.Timeout) else None,
+                return_value=response,
+            ):
+                with self.assertRaises(generic_football_adapter.GenericFootballProviderError):
+                    generic_football_adapter.get_season_matches(
+                        "premier_league", "2026-2027"
+                    )
 
 
 if __name__ == "__main__":

@@ -36,7 +36,7 @@ COMPETITIONS = [
         "supports_groups": False,
         "supports_knockout": False,
         "supports_standings": True,
-        "supports_predictions": False,
+        "supports_predictions": True,
         "supports_archive": False,
     },
 ]

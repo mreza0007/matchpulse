@@ -1,3 +1,4 @@
+import math
 import os
 import re
 from urllib.parse import quote, urljoin
@@ -35,16 +36,20 @@ def build_url(path):
     return urljoin(f"{base_url.rstrip('/')}/", path.lstrip("/"))
 
 
-def fetch_json(path):
+def fetch_json(path, *, required=False):
     url = build_url(path)
     if not url:
+        if required:
+            raise GenericFootballProviderError("Football provider unavailable")
         return None
 
     try:
         response = requests.get(url, timeout=get_timeout_seconds())
         response.raise_for_status()
         return response.json()
-    except (requests.RequestException, ValueError):
+    except (requests.RequestException, ValueError) as error:
+        if required:
+            raise GenericFootballProviderError("Football provider unavailable") from error
         return None
 
 
@@ -76,7 +81,27 @@ def normalize_status(value):
     return aliases.get(normalized, normalized or "unknown")
 
 
-def normalize_match(match):
+def normalize_finished_result(status, home_score, away_score, competition_format=None):
+    if status != "finished" or competition_format != "league":
+        return None
+    if isinstance(home_score, bool) or isinstance(away_score, bool):
+        return None
+    if not isinstance(home_score, (int, float)) or not isinstance(away_score, (int, float)):
+        return None
+    try:
+        scores_are_finite = math.isfinite(home_score) and math.isfinite(away_score)
+    except (OverflowError, TypeError, ValueError):
+        return None
+    if not scores_are_finite or home_score < 0 or away_score < 0:
+        return None
+    if home_score > away_score:
+        return "home"
+    if away_score > home_score:
+        return "away"
+    return "draw"
+
+
+def normalize_match(match, competition_format=None):
     if not isinstance(match, dict):
         return None
 
@@ -91,6 +116,9 @@ def normalize_match(match):
     round_value = match.get("round")
     home_score = match.get("home_score")
     away_score = match.get("away_score")
+    result = normalize_finished_result(
+        status, home_score, away_score, competition_format=competition_format
+    )
 
     return {
         "id": match.get("id"),
@@ -125,6 +153,8 @@ def normalize_match(match):
         "home_score": home_score,
         "away_score": away_score,
         "score": {"home": home_score, "away": away_score},
+        "result": result,
+        "result_source": "final_score" if result is not None else None,
         "home_penalty_score": match.get("home_penalties"),
         "away_penalty_score": match.get("away_penalties"),
         "warnings": normalize_warnings(match.get("warnings")),
@@ -185,13 +215,19 @@ def status_matches_filter(requested_status, match_status):
     return requested == "all" or requested == match_status
 
 
-def get_season_matches(competition_key, season_key, status="all"):
+def get_season_matches(competition_key, season_key, status="all", competition_format=None):
     competition = quote(str(competition_key), safe="")
     season = quote(str(season_key), safe="")
-    payload = fetch_json(f"/competitions/{competition}/seasons/{season}/matches")
+    payload = fetch_json(
+        f"/competitions/{competition}/seasons/{season}/matches", required=True
+    )
+    raw_matches = payload.get("matches") if isinstance(payload, dict) else payload
+    if not isinstance(raw_matches, list):
+        raise GenericFootballProviderError("Invalid matches payload")
+
     matches = []
-    for match in payload_items(payload, "matches"):
-        normalized = normalize_match(match)
+    for match in raw_matches:
+        normalized = normalize_match(match, competition_format=competition_format)
         if normalized is not None and status_matches_filter(status, normalized["status"]):
             matches.append(normalized)
     return matches

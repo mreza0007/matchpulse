@@ -61,7 +61,12 @@ COMPETITION_DATA_PROVIDERS = {
     "premier_league": {
         "seasons": {
             "2026-2027": {
-                "matches": partial(get_generic_season_matches, "premier_league", "2026-2027"),
+                "matches": partial(
+                    get_generic_season_matches,
+                    "premier_league",
+                    "2026-2027",
+                    competition_format="league",
+                ),
                 "standings": partial(get_generic_season_standings, "premier_league", "2026-2027"),
                 "teams": partial(get_generic_season_teams, "premier_league", "2026-2027"),
                 "live": get_generic_match_live,
@@ -94,7 +99,10 @@ def get_matches_for_season(competition_key, season_key, status="all"):
     if not season_provider or not season_provider.get("matches"):
         return None
 
-    return season_provider["matches"](status=status)
+    try:
+        return season_provider["matches"](status=status)
+    except GenericFootballProviderError as error:
+        raise CompetitionDataProviderError() from error
 
 
 def get_match_for_season(competition_key, season_key, match_id):

@@ -174,11 +174,6 @@ class PredictionV2ApiTests(unittest.TestCase):
         cases = [
             ({"competition_key": "unknown", "season_key": "2026"}, 404, "Competition not found"),
             ({"competition_key": "worldcup2026", "season_key": "unknown"}, 404, "Season not found"),
-            (
-                {"competition_key": "premier_league", "season_key": "2026-2027"},
-                501,
-                "Competition predictions not supported",
-            ),
         ]
         for scope, status, detail in cases:
             with self.subTest(scope=scope):
@@ -197,6 +192,44 @@ class PredictionV2ApiTests(unittest.TestCase):
             response = self.post_result()
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json(), {"detail": "Match not found"})
+
+    def test_premier_league_prediction_saves_with_opaque_match_id(self):
+        with patch("main.get_match_for_season", return_value=future_match("pl-match-id")):
+            response = self.client.post(
+                "/prediction",
+                json={
+                    "telegram_id": 10,
+                    "competition_key": "premier_league",
+                    "season_key": "2026-2027",
+                    "match_id": "pl-match-id",
+                    "prediction_type": "result",
+                    "predicted_result": "draw",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        prediction = response.json()["predictions"][0]
+        self.assertEqual(prediction["competition_key"], "premier_league")
+        self.assertEqual(prediction["match_id"], "pl-match-id")
+        self.assertEqual(prediction["prediction"], "draw")
+
+        with patch(
+            "main.get_match_for_season",
+            return_value={
+                "id": "pl-match-id",
+                "status": "finished",
+                "is_finished": True,
+                "result": "draw",
+                "result_source": "final_score",
+            },
+        ):
+            stats = self.client.get(
+                "/prediction-stats/10?competition_key=premier_league&season_key=2026-2027"
+            )
+        self.assertEqual(
+            stats.json(),
+            {"points": 3, "correct": 1, "wrong": 0, "pending": 0, "total": 1},
+        )
 
     def test_provider_failure_is_sanitized(self):
         with patch(
@@ -293,18 +326,21 @@ class PredictionV2ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 502)
         self.assertNotIn("secret", response.text)
 
-    def test_stats_leave_disabled_competition_prediction_pending_without_provider_call(self):
+    def test_stats_consume_generic_result_without_competition_branching(self):
         db_service.save_prediction_v2(
             10, "premier_league", "2026-2027", "generic-id", "result", "home"
         )
-        with patch("main.get_match_for_season") as resolver:
+        with patch(
+            "main.get_match_for_season",
+            return_value={"id": "generic-id", "status": "finished", "result": "home"},
+        ) as resolver:
             response = self.client.get("/prediction-stats/10")
 
         self.assertEqual(
             response.json(),
-            {"points": 0, "correct": 0, "wrong": 0, "pending": 1, "total": 1},
+            {"points": 3, "correct": 1, "wrong": 0, "pending": 0, "total": 1},
         )
-        resolver.assert_not_called()
+        resolver.assert_called_once_with("premier_league", "2026-2027", "generic-id")
 
 
 class PredictionDispatcherTests(unittest.TestCase):

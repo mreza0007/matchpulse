@@ -150,7 +150,10 @@ def get_competition_matches(competition_key: str, status: str = Query("all")):
     if not competition:
         raise HTTPException(status_code=404, detail="Competition not found")
 
-    matches = get_matches_for_competition(competition_key, status=status)
+    try:
+        matches = get_matches_for_competition(competition_key, status=status)
+    except CompetitionDataProviderError as error:
+        raise HTTPException(status_code=502, detail="Matches provider unavailable") from error
     if matches is None:
         raise HTTPException(status_code=501, detail="Competition data source not configured")
 
@@ -202,7 +205,10 @@ def get_competition_season_matches(competition_key: str, season_key: str, status
     if not season:
         raise HTTPException(status_code=404, detail="Season not found")
 
-    matches = get_matches_for_season(competition_key, season_key, status=status)
+    try:
+        matches = get_matches_for_season(competition_key, season_key, status=status)
+    except CompetitionDataProviderError as error:
+        raise HTTPException(status_code=502, detail="Matches provider unavailable") from error
     if matches is None:
         raise HTTPException(status_code=501, detail="Competition season data source not configured")
 

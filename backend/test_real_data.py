@@ -25,7 +25,7 @@ class RegistryAndDispatcherTests(unittest.TestCase):
         season = get_season("premier_league", "2026-2027")
         self.assertEqual(competition["name_en"], "Premier League")
         self.assertTrue(competition["supports_standings"])
-        self.assertFalse(competition["supports_predictions"])
+        self.assertTrue(competition["supports_predictions"])
         self.assertEqual(season["status"], "active")
         self.assertTrue(season["is_default"])
 
@@ -171,11 +171,10 @@ class AdapterHttpTests(unittest.TestCase):
         ))
 
     @patch("services.generic_football_adapter.requests.get")
-    def test_http_failure_returns_safe_empty_results(self, get):
+    def test_match_provider_failure_is_explicit_while_events_remain_safe(self, get):
         get.side_effect = generic_football_adapter.requests.RequestException("unavailable")
-        self.assertEqual(
-            generic_football_adapter.get_season_matches("premier_league", "2026-2027"), []
-        )
+        with self.assertRaises(generic_football_adapter.GenericFootballProviderError):
+            generic_football_adapter.get_season_matches("premier_league", "2026-2027")
         self.assertEqual(generic_football_adapter.get_match_events("mp_match_1")["events"], [])
 
 
@@ -239,6 +238,35 @@ class ScopedRouteTestClientTests(unittest.TestCase):
             "/competitions/premier_league/seasons/unknown/matches/mp_match_1/live"
         )
         self.assertEqual(response.status_code, 404)
+
+    @patch("services.generic_football_adapter.requests.get")
+    def test_scoped_matches_distinguish_empty_success_from_provider_failure(self, get):
+        wrapper_response = Mock()
+        wrapper_response.raise_for_status.return_value = None
+        wrapper_response.json.return_value = {"matches": []}
+        get.return_value = wrapper_response
+
+        empty = self.client.get(
+            "/competitions/premier_league/seasons/2026-2027/matches"
+        )
+        self.assertEqual(empty.status_code, 200)
+        self.assertEqual(empty.json()["matches"], [])
+
+        failures = (
+            generic_football_adapter.requests.Timeout("private timeout"),
+            generic_football_adapter.requests.HTTPError("private upstream 502"),
+        )
+        for provider_error in failures:
+            with self.subTest(provider_error=type(provider_error).__name__):
+                get.side_effect = provider_error
+                failure = self.client.get(
+                    "/competitions/premier_league/seasons/2026-2027/matches"
+                )
+                self.assertEqual(failure.status_code, 502)
+                self.assertEqual(
+                    failure.json(), {"detail": "Matches provider unavailable"}
+                )
+                self.assertNotIn(str(provider_error), failure.text)
 
 
 if __name__ == "__main__":
