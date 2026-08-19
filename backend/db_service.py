@@ -2,6 +2,7 @@ import sqlite3
 import json
 from pathlib import Path
 
+from favorite_schema import ensure_favorite_teams_v2_schema
 from prediction_schema import ensure_prediction_v2_schema
 from prediction_evaluation_service import canonical_prediction_result, calculate_prediction_stats
 
@@ -28,22 +29,7 @@ def init_db():
         """
     )
 
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS favorite_teams (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            telegram_id INTEGER,
-            team_id INTEGER,
-            team_key TEXT,
-            team_name TEXT,
-            team_data TEXT,
-            UNIQUE(telegram_id, team_id)
-        )
-        """
-    )
-
-    ensure_column(cursor, "favorite_teams", "team_key", "TEXT")
-    ensure_column(cursor, "favorite_teams", "team_name", "TEXT")
+    favorite_teams_schema = ensure_favorite_teams_v2_schema(conn)
 
     cursor.execute(
         """
@@ -97,14 +83,10 @@ def init_db():
         print("Legacy predictions schema detected; run the explicit prediction_v2 migration.")
     elif prediction_schema == "unknown":
         print("Unknown predictions schema detected; it was left untouched.")
-
-
-def ensure_column(cursor, table_name, column_name, column_type):
-    cursor.execute(f"PRAGMA table_info({table_name})")
-    existing_columns = {row[1] for row in cursor.fetchall()}
-
-    if column_name not in existing_columns:
-        cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
+    if favorite_teams_schema == "legacy":
+        print("Legacy favorites schema detected; run the explicit favorite_teams_v2 migration.")
+    elif favorite_teams_schema == "unknown":
+        print("Unknown favorites schema detected; it was left untouched.")
 
 
 def normalize_team_key(value):
