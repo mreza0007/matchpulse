@@ -2,11 +2,15 @@ import sqlite3
 import json
 from pathlib import Path
 
-from favorite_schema import ensure_favorite_teams_v2_schema
+from favorite_schema import ensure_favorite_teams_v2_schema, favorite_teams_schema_state
 from prediction_schema import ensure_prediction_v2_schema
 from prediction_evaluation_service import canonical_prediction_result, calculate_prediction_stats
 
 DB_PATH = Path(__file__).parent / "matchpulse.db"
+
+
+class FavoriteTeamsV2RequiredError(RuntimeError):
+    pass
 
 
 def get_connection():
@@ -373,6 +377,77 @@ def get_all_users_from_db():
         )
 
     return users
+
+
+def require_favorite_teams_v2(conn):
+    state = favorite_teams_schema_state(conn)
+    if state != "v2":
+        raise FavoriteTeamsV2RequiredError(state)
+
+
+def save_favorite_team_v2_to_db(telegram_id, competition_key, team_id):
+    conn = get_connection()
+    try:
+        require_favorite_teams_v2(conn)
+        cursor = conn.execute(
+            """
+            INSERT OR IGNORE INTO favorite_teams (
+                telegram_id, competition_key, team_id
+            ) VALUES (?, ?, ?)
+            """,
+            (telegram_id, competition_key, str(team_id)),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def get_favorite_team_identities_v2_from_db(telegram_id):
+    conn = get_connection()
+    try:
+        require_favorite_teams_v2(conn)
+        rows = conn.execute(
+            """
+            SELECT id, competition_key, team_id, created_at
+            FROM favorite_teams
+            WHERE telegram_id = ?
+            ORDER BY created_at, id
+            """,
+            (telegram_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return [
+        {
+            "id": row[0],
+            "competition_key": row[1],
+            "team_id": row[2],
+            "created_at": row[3],
+        }
+        for row in rows
+    ]
+
+
+def delete_favorite_team_v2_from_db(telegram_id, competition_key, team_id):
+    conn = get_connection()
+    try:
+        require_favorite_teams_v2(conn)
+        cursor = conn.execute(
+            """
+            DELETE FROM favorite_teams
+            WHERE telegram_id = ?
+              AND competition_key = ?
+              AND team_id = ?
+            """,
+            (telegram_id, competition_key, str(team_id)),
+        )
+        deleted = cursor.rowcount > 0
+        conn.commit()
+        return deleted
+    finally:
+        conn.close()
 
 
 def save_favorite_team_to_db(telegram_id, team):

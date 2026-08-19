@@ -236,12 +236,19 @@ def get_season_matches(competition_key, season_key, status="all", competition_fo
 def get_season_teams(competition_key, season_key):
     competition = quote(str(competition_key), safe="")
     season = quote(str(season_key), safe="")
-    payload = fetch_json(f"/competitions/{competition}/seasons/{season}/teams")
+    payload = fetch_json(
+        f"/competitions/{competition}/seasons/{season}/teams", required=True
+    )
+    raw_teams = payload.get("teams") if isinstance(payload, dict) else payload
+    if not isinstance(raw_teams, list):
+        raise GenericFootballProviderError("Invalid teams payload")
+
     teams = []
-    for team in payload_items(payload, "teams"):
+    for team in raw_teams:
         normalized = normalize_team(team)
-        if normalized is not None:
-            teams.append(normalized)
+        if normalized is None or normalized.get("id") is None:
+            raise GenericFootballProviderError("Invalid teams payload")
+        teams.append(normalized)
     return teams
 
 

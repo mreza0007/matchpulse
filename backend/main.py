@@ -4,7 +4,7 @@ import sqlite3
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictInt, StrictStr
 
 from scheduler_service import start_scheduler
 from data import NEWS
@@ -25,11 +25,18 @@ from competition_data_service import (
     get_matches_for_competition,
     get_matches_for_season,
     get_standings_for_season,
+    get_team_for_competition,
     get_teams_for_competition,
     get_teams_for_season,
 )
 from season_service import get_season, get_seasons
 from news_service import filter_news
+from favorite_service import (
+    FavoriteTeamTypeError,
+    favorite_response_item,
+    favorite_team_type,
+    resolve_favorite_identities,
+)
 from prediction_service import prediction_is_locked, prediction_is_predictable
 from prediction_evaluation_service import (
     calculate_prediction_stats,
@@ -44,10 +51,11 @@ from db_service import (
     init_db,
     save_user_to_db,
     get_all_users_from_db,
-    save_favorite_team_to_db,
-    get_favorite_teams_from_db,
     get_all_favorite_teams_from_db,
-    delete_favorite_team_from_db,
+    FavoriteTeamsV2RequiredError,
+    delete_favorite_team_v2_from_db,
+    get_favorite_team_identities_v2_from_db,
+    save_favorite_team_v2_to_db,
     save_reminder_to_db,
     get_reminders_from_db,
     get_all_reminders_from_db,
@@ -101,12 +109,16 @@ class UserData(BaseModel):
 
 class FavoriteTeamData(BaseModel):
     telegram_id: int
-    team_id: int | str | None = None
+    competition_key: str | None = None
+    team_id: StrictInt | StrictStr | None = None
     team_key: str = ""
     team_name: str = ""
     name_en: str = ""
     name_fa: str = ""
     emoji: str = ""
+
+    class Config:
+        extra = "forbid"
 
 
 class ReminderData(BaseModel):
@@ -508,59 +520,152 @@ def get_teams():
     }
 
 
+def validate_favorite_telegram_id(telegram_id):
+    if telegram_id <= 0:
+        raise HTTPException(status_code=400, detail="Invalid telegram_id")
+
+
+def favorite_request_has_legacy_display_data(data):
+    return any(
+        value
+        for value in (
+            data.team_key,
+            data.team_name,
+            data.name_en,
+            data.name_fa,
+            data.emoji,
+        )
+    )
+
+
+def normalize_favorite_request(data):
+    validate_favorite_telegram_id(data.telegram_id)
+
+    if data.competition_key is None:
+        if not isinstance(data.team_id, int) or isinstance(data.team_id, bool) or data.team_id <= 0:
+            raise HTTPException(
+                status_code=422,
+                detail="Legacy favorites require a numeric World Cup team_id",
+            )
+        competition = get_competition("worldcup2026")
+        team_id = str(data.team_id)
+        is_legacy = True
+    else:
+        competition = get_competition(data.competition_key)
+        if not competition:
+            raise HTTPException(status_code=404, detail="Competition not found")
+        if data.team_id is None or str(data.team_id) == "":
+            raise HTTPException(status_code=422, detail="team_id is required")
+        team_id = str(data.team_id)
+        is_legacy = False
+
+    try:
+        favorite_team_type(competition)
+    except FavoriteTeamTypeError as error:
+        raise HTTPException(
+            status_code=422, detail="Competition team type is unsupported"
+        ) from error
+    return competition, team_id, is_legacy
+
+
+def resolve_favorite_team(competition, team_id):
+    try:
+        team = get_team_for_competition(competition["competition_key"], team_id)
+    except CompetitionDataProviderError as error:
+        raise HTTPException(status_code=502, detail="Teams provider unavailable") from error
+    if team is None:
+        raise HTTPException(status_code=404, detail="Team not found")
+    return team
+
+
+def favorite_storage_http_error(error):
+    if isinstance(error, FavoriteTeamsV2RequiredError) and str(error) == "legacy":
+        return HTTPException(status_code=503, detail="Favorites V2 migration required")
+    return HTTPException(status_code=503, detail="Favorites storage unavailable")
+
+
+def favorite_list_payload(telegram_id):
+    identities = get_favorite_team_identities_v2_from_db(telegram_id)
+    resolution = resolve_favorite_identities(identities)
+    return {
+        "count": len(identities),
+        "resolution_errors": resolution["resolution_errors"],
+        "unresolved_count": resolution["unresolved_count"],
+        "favorite_teams": resolution["favorite_teams"],
+    }
+
+
 @api.post("/favorite-team")
 def save_favorite_team(data: FavoriteTeamData):
-    teams = get_real_teams()
-    selected_team = None
+    competition, team_id, is_legacy = normalize_favorite_request(data)
+    if not is_legacy and favorite_request_has_legacy_display_data(data):
+        raise HTTPException(
+            status_code=422,
+            detail="Favorite display metadata must not be supplied",
+        )
 
-    for team in teams:
-        if str(team.get("id")) == str(data.team_id):
-            selected_team = team
-            break
+    team = resolve_favorite_team(competition, team_id)
+    try:
+        created = save_favorite_team_v2_to_db(
+            data.telegram_id, competition["competition_key"], team_id
+        )
+        payload = favorite_list_payload(data.telegram_id)
+    except (FavoriteTeamsV2RequiredError, sqlite3.Error) as error:
+        raise favorite_storage_http_error(error) from error
 
-    if selected_team is None:
-        selected_team = {
-            "id": data.team_id or data.team_key or data.team_name or data.name_en or data.name_fa,
-            "team_key": data.team_key,
-            "team_name": data.team_name or data.name_en or data.name_fa,
-            "name_en": data.name_en or data.team_name,
-            "name_fa": data.name_fa or data.team_name or data.name_en,
-            "emoji": data.emoji or "\u26bd",
-        }
-
-    save_favorite_team_to_db(data.telegram_id, selected_team)
-
-    favorite_teams[data.telegram_id] = get_favorite_teams_from_db(data.telegram_id)
-
+    favorite_teams[data.telegram_id] = payload["favorite_teams"]
     return {
         "success": True,
+        "created": created,
         "telegram_id": data.telegram_id,
-        "favorite_teams": favorite_teams[data.telegram_id],
+        "favorite": favorite_response_item(
+            {
+                "competition_key": competition["competition_key"],
+                "team_id": team_id,
+            },
+            competition=competition,
+            team=team,
+        ),
+        **payload,
     }
 
 
 @api.get("/favorite-teams/{telegram_id}")
 def get_favorite_teams(telegram_id: int):
-    teams = get_favorite_teams_from_db(telegram_id)
-    favorite_teams[telegram_id] = teams
-
-    return {
-        "telegram_id": telegram_id,
-        "count": len(teams),
-        "favorite_teams": teams,
-    }
+    validate_favorite_telegram_id(telegram_id)
+    try:
+        payload = favorite_list_payload(telegram_id)
+    except (FavoriteTeamsV2RequiredError, sqlite3.Error) as error:
+        raise favorite_storage_http_error(error) from error
+    favorite_teams[telegram_id] = payload["favorite_teams"]
+    return {"telegram_id": telegram_id, **payload}
 
 
 @api.delete("/favorite-team")
 def delete_favorite_team(data: FavoriteTeamData):
-    deleted = delete_favorite_team_from_db(data.telegram_id, data.team_id, data.team_key)
-    favorite_teams[data.telegram_id] = get_favorite_teams_from_db(data.telegram_id)
+    competition, team_id, is_legacy = normalize_favorite_request(data)
+    if not is_legacy and favorite_request_has_legacy_display_data(data):
+        raise HTTPException(
+            status_code=422,
+            detail="Favorite display metadata must not be supplied",
+        )
+    if is_legacy:
+        resolve_favorite_team(competition, team_id)
 
+    try:
+        deleted = delete_favorite_team_v2_from_db(
+            data.telegram_id, competition["competition_key"], team_id
+        )
+        payload = favorite_list_payload(data.telegram_id)
+    except (FavoriteTeamsV2RequiredError, sqlite3.Error) as error:
+        raise favorite_storage_http_error(error) from error
+
+    favorite_teams[data.telegram_id] = payload["favorite_teams"]
     return {
         "success": True,
         "deleted": deleted,
         "telegram_id": data.telegram_id,
-        "favorite_teams": favorite_teams[data.telegram_id],
+        **payload,
     }
 
 

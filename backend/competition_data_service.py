@@ -1,5 +1,6 @@
 from functools import partial
 
+from competition_service import get_competition
 from real_data_service import get_real_matches, get_real_teams, get_worldcup_knockout_rounds
 from season_service import get_default_season
 from services.worldcup_adapter import (
@@ -153,7 +154,32 @@ def get_teams_for_season(competition_key, season_key):
     if not season_provider or not season_provider.get("teams"):
         return None
 
-    return season_provider["teams"]()
+    try:
+        return season_provider["teams"]()
+    except GenericFootballProviderError as error:
+        raise CompetitionDataProviderError() from error
+
+
+def get_team_for_competition(competition_key, team_id):
+    """Resolve an opaque team ID through the competition's configured default season."""
+    if not get_competition(competition_key):
+        return None
+
+    teams = get_teams_for_competition(competition_key)
+    if teams is None:
+        return None
+
+    requested_team_id = str(team_id)
+    return next(
+        (
+            team
+            for team in teams
+            if isinstance(team, dict)
+            and team.get("id") is not None
+            and str(team["id"]) == requested_team_id
+        ),
+        None,
+    )
 
 
 def get_standings_for_season(competition_key, season_key):
