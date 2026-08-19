@@ -2,11 +2,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchCompetitions } from "../api/football.js";
 import {
   fetchPredictableMatches,
+  fetchPredictionHistory,
+  fetchPredictionLeaderboard,
   fetchPredictionStats,
   fetchUserPredictions,
   savePrediction,
 } from "../api/predictions.js";
 import CompetitionLogo from "../components/competitions/CompetitionLogo.jsx";
+import PredictionHistoryItem from "../components/predictions/PredictionHistoryItem.jsx";
+import PredictionLeaderboard from "../components/predictions/PredictionLeaderboard.jsx";
 import PredictionMatchCard from "../components/predictions/PredictionMatchCard.jsx";
 import { getCompetitionName } from "../utils/competitions.js";
 
@@ -42,6 +46,11 @@ function predictionErrorLabel(status, t) {
   return t.predictionLoadError;
 }
 
+function sectionErrorLabel(status, fallback, t) {
+  if (status === 502 || status === 503) return t.predictionServiceUnavailable;
+  return fallback;
+}
+
 function PredictionsSkeleton() {
   return (
     <div className="predictions-skeleton" aria-hidden="true">
@@ -50,6 +59,10 @@ function PredictionsSkeleton() {
       <span />
     </div>
   );
+}
+
+function PredictionSectionSkeleton() {
+  return <div className="prediction-section-skeleton" aria-hidden="true"><span /><span /></div>;
 }
 
 export default function PredictionsPage({ lang, t, telegramId }) {
@@ -70,9 +83,29 @@ export default function PredictionsPage({ lang, t, telegramId }) {
     errorStatus: null,
   });
   const [matchStates, setMatchStates] = useState({});
+  const [historyView, setHistoryView] = useState({
+    items: [],
+    evaluationErrors: 0,
+    isLoading: false,
+    errorStatus: null,
+  });
+  const [leaderboardView, setLeaderboardView] = useState({
+    entries: [],
+    evaluationErrors: 0,
+    isLoading: false,
+    errorStatus: null,
+  });
+  const [historyRefreshVersion, setHistoryRefreshVersion] = useState(0);
+  const [leaderboardRefreshVersion, setLeaderboardRefreshVersion] = useState(0);
   const cache = useRef(new Map());
+  const historyCache = useRef(new Map());
+  const leaderboardCache = useRef(new Map());
   const activeRequest = useRef(null);
+  const activeHistoryRequest = useRef(null);
+  const activeLeaderboardRequest = useRef(null);
   const requestVersion = useRef(0);
+  const historyRequestVersion = useRef(0);
+  const leaderboardRequestVersion = useRef(0);
   const saveRequests = useRef(new Map());
 
   useEffect(() => {
@@ -175,8 +208,108 @@ export default function PredictionsPage({ lang, t, telegramId }) {
     return () => controller.abort();
   }, [hasUsableTelegramId, retryVersion, selectedCompetition, telegramId]);
 
+  useEffect(() => {
+    if (!hasUsableTelegramId || !selectedCompetition) return undefined;
+    const key = scopeKey(selectedCompetition);
+    const cached = historyCache.current.get(key);
+    if (cached && historyRefreshVersion === 0) {
+      setHistoryView({ ...cached, isLoading: false, errorStatus: null });
+      return undefined;
+    }
+
+    activeHistoryRequest.current?.abort();
+    const controller = new AbortController();
+    activeHistoryRequest.current = controller;
+    const version = historyRequestVersion.current + 1;
+    historyRequestVersion.current = version;
+    setHistoryView({
+      items: cached?.items || [],
+      evaluationErrors: cached?.evaluationErrors || 0,
+      isLoading: true,
+      errorStatus: null,
+    });
+
+    fetchPredictionHistory(telegramId, {
+      competitionKey: selectedCompetition.competition_key,
+      seasonKey: selectedCompetition.season_key,
+      signal: controller.signal,
+    })
+      .then(responseJson)
+      .then((payload) => {
+        if (controller.signal.aborted || historyRequestVersion.current !== version) return;
+        const next = {
+          items: Array.isArray(payload.history) ? payload.history : [],
+          evaluationErrors: Number(payload.evaluation_errors) || 0,
+        };
+        historyCache.current.set(key, next);
+        setHistoryView({ ...next, isLoading: false, errorStatus: null });
+      })
+      .catch((error) => {
+        if (error.name === "AbortError" || historyRequestVersion.current !== version) return;
+        setHistoryView({
+          items: cached?.items || [],
+          evaluationErrors: cached?.evaluationErrors || 0,
+          isLoading: false,
+          errorStatus: error.status || 0,
+        });
+      });
+
+    return () => controller.abort();
+  }, [hasUsableTelegramId, historyRefreshVersion, selectedCompetition, telegramId]);
+
+  useEffect(() => {
+    if (!hasUsableTelegramId || !selectedCompetition) return undefined;
+    const key = scopeKey(selectedCompetition);
+    const cached = leaderboardCache.current.get(key);
+    if (cached && leaderboardRefreshVersion === 0) {
+      setLeaderboardView({ ...cached, isLoading: false, errorStatus: null });
+      return undefined;
+    }
+
+    activeLeaderboardRequest.current?.abort();
+    const controller = new AbortController();
+    activeLeaderboardRequest.current = controller;
+    const version = leaderboardRequestVersion.current + 1;
+    leaderboardRequestVersion.current = version;
+    setLeaderboardView({
+      entries: cached?.entries || [],
+      evaluationErrors: cached?.evaluationErrors || 0,
+      isLoading: true,
+      errorStatus: null,
+    });
+
+    fetchPredictionLeaderboard({
+      competitionKey: selectedCompetition.competition_key,
+      seasonKey: selectedCompetition.season_key,
+      signal: controller.signal,
+    })
+      .then(responseJson)
+      .then((payload) => {
+        if (controller.signal.aborted || leaderboardRequestVersion.current !== version) return;
+        const next = {
+          entries: Array.isArray(payload.leaderboard) ? payload.leaderboard : [],
+          evaluationErrors: Number(payload.evaluation_errors) || 0,
+        };
+        leaderboardCache.current.set(key, next);
+        setLeaderboardView({ ...next, isLoading: false, errorStatus: null });
+      })
+      .catch((error) => {
+        if (error.name === "AbortError" || leaderboardRequestVersion.current !== version) return;
+        setLeaderboardView({
+          entries: cached?.entries || [],
+          evaluationErrors: cached?.evaluationErrors || 0,
+          isLoading: false,
+          errorStatus: error.status || 0,
+        });
+      });
+
+    return () => controller.abort();
+  }, [hasUsableTelegramId, leaderboardRefreshVersion, selectedCompetition]);
+
   useEffect(() => () => {
     activeRequest.current?.abort();
+    activeHistoryRequest.current?.abort();
+    activeLeaderboardRequest.current?.abort();
     saveRequests.current.forEach((controller) => controller.abort());
   }, []);
 
@@ -242,6 +375,13 @@ export default function PredictionsPage({ lang, t, telegramId }) {
         ...current,
         [stateKey]: { isSaving: false, isLocked: false, errorMessage: "", saved: true },
       }));
+
+      historyCache.current.delete(key);
+      leaderboardCache.current.delete(key);
+      if (selectedScopeRef.current === key) {
+        setHistoryRefreshVersion((value) => value + 1);
+        setLeaderboardRefreshVersion((value) => value + 1);
+      }
 
       try {
         const stats = normalizeStats(await fetchPredictionStats(telegramId, {
@@ -337,6 +477,8 @@ export default function PredictionsPage({ lang, t, telegramId }) {
               onClick={() => {
                 setSelectedKey(competition.competition_key);
                 setRetryVersion(0);
+                setHistoryRefreshVersion(0);
+                setLeaderboardRefreshVersion(0);
               }}
               type="button"
             >
@@ -393,6 +535,72 @@ export default function PredictionsPage({ lang, t, telegramId }) {
           })}
         </div>
       )}
+
+      <section className="prediction-history-section">
+        <h2>{t.predictionHistoryTitle}</h2>
+        {historyView.isLoading && historyView.items.length === 0 && <PredictionSectionSkeleton />}
+        {historyView.errorStatus != null && historyView.items.length === 0 && (
+          <div className="prediction-section-state">
+            <p>{sectionErrorLabel(historyView.errorStatus, t.predictionHistoryLoadError, t)}</p>
+            <button onClick={() => setHistoryRefreshVersion((value) => value + 1)} type="button">
+              {t.retry}
+            </button>
+          </div>
+        )}
+        {historyView.errorStatus != null && historyView.items.length > 0 && (
+          <p className="home-inline-warning">
+            {sectionErrorLabel(historyView.errorStatus, t.predictionHistoryLoadError, t)}
+          </p>
+        )}
+        {!historyView.isLoading && historyView.errorStatus == null && historyView.items.length === 0 && (
+          <div className="prediction-section-state">{t.predictionHistoryEmpty}</div>
+        )}
+        {historyView.evaluationErrors > 0 && (
+          <p className="home-inline-warning">{t.predictionEvaluationWarning}</p>
+        )}
+        {historyView.items.length > 0 && (
+          <div className={`prediction-history-list ${historyView.isLoading ? "loading" : ""}`}>
+            {historyView.items.map((item, index) => (
+              <PredictionHistoryItem item={item} key={`${item.updated_at || "history"}:${index}`} t={t} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="prediction-leaderboard-section">
+        <h2>{t.predictionLeaderboardTitle}</h2>
+        {leaderboardView.isLoading && leaderboardView.entries.length === 0 && <PredictionSectionSkeleton />}
+        {leaderboardView.errorStatus != null && leaderboardView.entries.length === 0 && (
+          <div className="prediction-section-state">
+            <p>{sectionErrorLabel(
+              leaderboardView.errorStatus,
+              t.predictionLeaderboardLoadError,
+              t,
+            )}</p>
+            <button onClick={() => setLeaderboardRefreshVersion((value) => value + 1)} type="button">
+              {t.retry}
+            </button>
+          </div>
+        )}
+        {leaderboardView.errorStatus != null && leaderboardView.entries.length > 0 && (
+          <p className="home-inline-warning">
+            {sectionErrorLabel(leaderboardView.errorStatus, t.predictionLeaderboardLoadError, t)}
+          </p>
+        )}
+        {!leaderboardView.isLoading
+          && leaderboardView.errorStatus == null
+          && leaderboardView.entries.length === 0 && (
+            <div className="prediction-section-state">{t.predictionLeaderboardEmpty}</div>
+          )}
+        {leaderboardView.evaluationErrors > 0 && (
+          <p className="home-inline-warning">{t.predictionEvaluationWarning}</p>
+        )}
+        {leaderboardView.entries.length > 0 && (
+          <div className={leaderboardView.isLoading ? "prediction-section-loading" : ""}>
+            <PredictionLeaderboard entries={leaderboardView.entries} t={t} />
+          </div>
+        )}
+      </section>
     </section>
   );
 }

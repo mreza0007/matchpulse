@@ -38,6 +38,24 @@ export function fetchPredictionStats(
   );
 }
 
+export function fetchPredictionHistory(
+  telegramId,
+  { competitionKey, seasonKey, signal } = {},
+) {
+  const query = scopedQuery(competitionKey, seasonKey);
+  return request(
+    `${API_BASE_URL}/prediction-history/${encodeURIComponent(telegramId)}${query}`,
+    { signal },
+  );
+}
+
+export function fetchPredictionLeaderboard(
+  { competitionKey, seasonKey, signal } = {},
+) {
+  const query = scopedQuery(competitionKey, seasonKey);
+  return request(`${API_BASE_URL}/prediction-leaderboard${query}`, { signal });
+}
+
 export function savePrediction(payload, { signal } = {}) {
   return request(`${API_BASE_URL}/prediction`, {
     method: "POST",
