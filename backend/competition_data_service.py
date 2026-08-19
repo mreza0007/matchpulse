@@ -97,6 +97,28 @@ def get_matches_for_season(competition_key, season_key, status="all"):
     return season_provider["matches"](status=status)
 
 
+def get_match_for_season(competition_key, season_key, match_id):
+    try:
+        matches = get_matches_for_season(competition_key, season_key, status="all")
+    except CompetitionDataProviderError:
+        raise
+    except Exception as error:
+        raise CompetitionDataProviderError() from error
+
+    if matches is None:
+        return None
+
+    requested_match_id = str(match_id)
+    return next(
+        (
+            match
+            for match in matches
+            if isinstance(match, dict) and str(match.get("id")) == requested_match_id
+        ),
+        None,
+    )
+
+
 def get_teams_for_competition(competition_key):
     default_season = get_default_season(competition_key)
     if not default_season:

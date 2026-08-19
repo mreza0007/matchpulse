@@ -116,92 +116,151 @@ def normalize_team_key(value):
 
 
 ALLOWED_PREDICTIONS = {"home", "draw", "away"}
+ALLOWED_PREDICTION_TYPES = {"result", "exact_score"}
 
 
-def save_prediction(telegram_id, match_id, prediction):
-    if prediction not in ALLOWED_PREDICTIONS:
-        raise ValueError("Invalid prediction")
-
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        INSERT INTO predictions (telegram_id, match_id, prediction)
-        VALUES (?, ?, ?)
-        ON CONFLICT(telegram_id, match_id) DO UPDATE SET
-            prediction = excluded.prediction,
-            updated_at = CURRENT_TIMESTAMP
-        """,
-        (telegram_id, match_id, prediction),
-    )
-    conn.commit()
-    conn.close()
-    return get_prediction(telegram_id, match_id)
+def derived_prediction_result(home_score, away_score):
+    if home_score > away_score:
+        return "home"
+    if home_score < away_score:
+        return "away"
+    return "draw"
 
 
-def get_user_predictions(telegram_id):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        SELECT id, telegram_id, match_id, prediction, created_at, updated_at
-        FROM predictions
-        WHERE telegram_id = ?
-        ORDER BY updated_at DESC, id DESC
-        """,
-        (telegram_id,),
-    )
-    rows = cursor.fetchall()
-    conn.close()
-    return [
-        {
-            "id": row[0],
-            "telegram_id": row[1],
-            "match_id": row[2],
-            "prediction": row[3],
-            "created_at": row[4],
-            "updated_at": row[5],
-        }
-        for row in rows
-    ]
+def validate_prediction_shape(prediction_type, predicted_result, home_score, away_score):
+    if prediction_type not in ALLOWED_PREDICTION_TYPES:
+        raise ValueError("Invalid prediction type")
+
+    if prediction_type == "result":
+        if predicted_result not in ALLOWED_PREDICTIONS or home_score is not None or away_score is not None:
+            raise ValueError("Invalid result prediction")
+        return predicted_result, None, None
+
+    if (
+        not isinstance(home_score, int)
+        or isinstance(home_score, bool)
+        or not isinstance(away_score, int)
+        or isinstance(away_score, bool)
+        or home_score < 0
+        or away_score < 0
+    ):
+        raise ValueError("Invalid exact score prediction")
+
+    derived_result = derived_prediction_result(home_score, away_score)
+    if predicted_result not in {None, derived_result}:
+        raise ValueError("Invalid exact score result")
+    return derived_result, home_score, away_score
 
 
-def get_prediction(telegram_id, match_id):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        SELECT id, telegram_id, match_id, prediction, created_at, updated_at
-        FROM predictions
-        WHERE telegram_id = ? AND match_id = ?
-        """,
-        (telegram_id, match_id),
-    )
-    row = cursor.fetchone()
-    conn.close()
-    if row is None:
-        return None
-    return {
+PREDICTION_V2_SELECT = """
+    SELECT id, telegram_id, competition_key, season_key, match_id,
+           prediction_type, predicted_result, home_score, away_score,
+           points_awarded, evaluated_at, created_at, updated_at
+    FROM predictions
+"""
+
+
+def prediction_v2_from_row(row):
+    prediction = {
         "id": row[0],
         "telegram_id": row[1],
-        "match_id": row[2],
-        "prediction": row[3],
-        "created_at": row[4],
-        "updated_at": row[5],
+        "competition_key": row[2],
+        "season_key": row[3],
+        "match_id": row[4],
+        "prediction_type": row[5],
+        "predicted_result": row[6],
+        "home_score": row[7],
+        "away_score": row[8],
+        "points_awarded": row[9],
+        "evaluated_at": row[10],
+        "created_at": row[11],
+        "updated_at": row[12],
     }
+    if prediction["prediction_type"] == "result":
+        prediction["prediction"] = prediction["predicted_result"]
+    return prediction
 
 
-def delete_prediction(telegram_id, match_id):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "DELETE FROM predictions WHERE telegram_id = ? AND match_id = ?",
-        (telegram_id, match_id),
+def save_prediction_v2(
+    telegram_id,
+    competition_key,
+    season_key,
+    match_id,
+    prediction_type,
+    predicted_result=None,
+    home_score=None,
+    away_score=None,
+):
+    predicted_result, home_score, away_score = validate_prediction_shape(
+        prediction_type, predicted_result, home_score, away_score
     )
-    conn.commit()
-    deleted = cursor.rowcount > 0
-    conn.close()
-    return deleted
+    canonical_match_id = str(match_id)
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO predictions (
+                telegram_id, competition_key, season_key, match_id,
+                prediction_type, predicted_result, home_score, away_score
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(telegram_id, competition_key, season_key, match_id) DO UPDATE SET
+                prediction_type = excluded.prediction_type,
+                predicted_result = excluded.predicted_result,
+                home_score = excluded.home_score,
+                away_score = excluded.away_score,
+                points_awarded = NULL,
+                evaluated_at = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                telegram_id,
+                competition_key,
+                season_key,
+                canonical_match_id,
+                prediction_type,
+                predicted_result,
+                home_score,
+                away_score,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return get_prediction_v2(telegram_id, competition_key, season_key, canonical_match_id)
+
+
+def get_prediction_v2(telegram_id, competition_key, season_key, match_id):
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            PREDICTION_V2_SELECT
+            + " WHERE telegram_id = ? AND competition_key = ? AND season_key = ? AND match_id = ?",
+            (telegram_id, competition_key, season_key, str(match_id)),
+        ).fetchone()
+    finally:
+        conn.close()
+    return prediction_v2_from_row(row) if row else None
+
+
+def get_user_predictions_v2(telegram_id, competition_key=None, season_key=None):
+    clauses = ["telegram_id = ?"]
+    parameters = [telegram_id]
+    if competition_key is not None:
+        clauses.append("competition_key = ?")
+        parameters.append(competition_key)
+    if season_key is not None:
+        clauses.append("season_key = ?")
+        parameters.append(season_key)
+
+    query = PREDICTION_V2_SELECT + " WHERE " + " AND ".join(clauses)
+    query += " ORDER BY updated_at DESC, id DESC"
+    conn = get_connection()
+    try:
+        rows = conn.execute(query, parameters).fetchall()
+    finally:
+        conn.close()
+    return [prediction_v2_from_row(row) for row in rows]
 
 
 def canonical_prediction_result(match):
@@ -250,19 +309,22 @@ def canonical_prediction_result(match):
     return "draw"
 
 
-def get_prediction_stats(telegram_id, matches):
-    predictions = get_user_predictions(telegram_id)
-    matches_by_id = {str(match.get("id")): match for match in matches}
+def calculate_prediction_stats(predictions, matches_by_identity):
     correct = 0
     wrong = 0
     pending = 0
 
     for prediction in predictions:
-        match = matches_by_id.get(str(prediction["match_id"]))
+        identity = (
+            prediction["competition_key"],
+            prediction["season_key"],
+            prediction["match_id"],
+        )
+        match = matches_by_identity.get(identity)
         result = canonical_prediction_result(match)
         if result is None:
             pending += 1
-        elif prediction["prediction"] == result:
+        elif prediction["predicted_result"] == result:
             correct += 1
         else:
             wrong += 1

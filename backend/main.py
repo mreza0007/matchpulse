@@ -1,6 +1,9 @@
 import os
 import asyncio
+import math
+import sqlite3
 import time
+from datetime import datetime
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +19,7 @@ from competition_data_service import (
     CompetitionKnockoutProviderError,
     CompetitionKnockoutUnavailableError,
     CompetitionStandingsUnavailableError,
+    get_match_for_season,
     get_match_events_for_season,
     get_groups_for_season,
     get_knockout_for_season,
@@ -43,9 +47,10 @@ from db_service import (
     get_reminders_from_db,
     get_all_reminders_from_db,
     delete_reminder_from_db,
-    save_prediction,
-    get_user_predictions,
-    get_prediction_stats,
+    calculate_prediction_stats,
+    get_user_predictions_v2,
+    save_prediction_v2,
+    validate_prediction_shape,
 )
 
 from telegram import (
@@ -105,8 +110,14 @@ class ReminderData(BaseModel):
 
 class PredictionData(BaseModel):
     telegram_id: int
-    match_id: int
-    prediction: str
+    match_id: str | int
+    competition_key: str | None = None
+    season_key: str | None = None
+    prediction_type: str | None = None
+    predicted_result: str | None = None
+    home_score: int | None = None
+    away_score: int | None = None
+    prediction: str | None = None
 
 
 def load_memory_from_db():
@@ -574,59 +585,237 @@ def delete_reminder(data: ReminderData):
     }
 
 
-def prediction_match(match_id):
-    return next(
-        (match for match in get_real_matches(status="all") if str(match.get("id")) == str(match_id)),
-        None,
-    )
+def trusted_prediction_kickoff(match):
+    for key in ("kickoff_ts", "kickoff_timestamp"):
+        value = match.get(key)
+        if value is None or isinstance(value, bool):
+            continue
+        try:
+            timestamp = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(timestamp) and timestamp > 0:
+            return timestamp
+
+    for key in ("kickoff_utc", "kickoff_iso", "kickoff"):
+        value = match.get(key)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            continue
+        return parsed.timestamp()
+
+    return None
 
 
-def prediction_is_locked(match):
+def prediction_is_locked(match, now_timestamp=None):
     if not match:
         return True
     if match.get("is_live") is True or match.get("is_finished") is True:
         return True
-    if match.get("is_upcoming") is not True or str(match.get("status") or "").lower() != "upcoming":
+    status = str(match.get("status") or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if match.get("is_upcoming") is not True or status != "upcoming":
         return True
-    try:
-        kickoff_ts = float(match.get("kickoff_ts") or match.get("kickoff_timestamp"))
-    except (TypeError, ValueError):
+    kickoff_ts = trusted_prediction_kickoff(match)
+    if kickoff_ts is None:
         return True
-    return kickoff_ts <= time.time()
+    current_timestamp = time.time() if now_timestamp is None else now_timestamp
+    return kickoff_ts <= current_timestamp
+
+
+def normalize_prediction_request(data):
+    has_v2_fields = any(
+        value is not None
+        for value in (
+            data.competition_key,
+            data.season_key,
+            data.prediction_type,
+            data.predicted_result,
+            data.home_score,
+            data.away_score,
+        )
+    )
+    is_legacy = (
+        data.prediction is not None
+        and not has_v2_fields
+        and isinstance(data.match_id, int)
+        and not isinstance(data.match_id, bool)
+    )
+
+    if is_legacy:
+        if data.match_id <= 0:
+            raise ValueError("Invalid match_id")
+        prediction = data.prediction.strip().lower()
+        predicted_result, home_score, away_score = validate_prediction_shape(
+            "result", prediction, None, None
+        )
+        return {
+            "competition_key": "worldcup2026",
+            "season_key": "2026",
+            "match_id": str(data.match_id),
+            "prediction_type": "result",
+            "predicted_result": predicted_result,
+            "home_score": home_score,
+            "away_score": away_score,
+        }
+
+    if data.prediction is not None:
+        raise ValueError("Legacy prediction body cannot include V2 fields")
+    if not data.competition_key or not data.season_key or data.prediction_type is None:
+        raise ValueError("Competition, season, and prediction type are required")
+
+    prediction_type = data.prediction_type.strip().lower()
+    predicted_result = (
+        data.predicted_result.strip().lower()
+        if isinstance(data.predicted_result, str)
+        else data.predicted_result
+    )
+    predicted_result, home_score, away_score = validate_prediction_shape(
+        prediction_type,
+        predicted_result,
+        data.home_score,
+        data.away_score,
+    )
+    match_id = str(data.match_id).strip()
+    if not match_id:
+        raise ValueError("Invalid match_id")
+    return {
+        "competition_key": data.competition_key.strip().lower(),
+        "season_key": data.season_key.strip().lower(),
+        "match_id": match_id,
+        "prediction_type": prediction_type,
+        "predicted_result": predicted_result,
+        "home_score": home_score,
+        "away_score": away_score,
+    }
+
+
+def validate_prediction_scope(competition_key, season_key, require_capability=True):
+    competition = get_competition(competition_key)
+    if not competition:
+        raise HTTPException(status_code=404, detail="Competition not found")
+    season = get_season(competition["competition_key"], season_key)
+    if not season:
+        raise HTTPException(status_code=404, detail="Season not found")
+    if require_capability and competition.get("supports_predictions") is not True:
+        raise HTTPException(status_code=501, detail="Competition predictions not supported")
+    return competition["competition_key"], season["season_key"]
+
+
+def normalize_prediction_filters(competition_key, season_key):
+    normalized_competition = competition_key.strip().lower() if competition_key else None
+    normalized_season = season_key.strip().lower() if season_key else None
+    if normalized_competition:
+        competition = get_competition(normalized_competition)
+        if not competition:
+            raise HTTPException(status_code=404, detail="Competition not found")
+        normalized_competition = competition["competition_key"]
+        if normalized_season and not get_season(normalized_competition, normalized_season):
+            raise HTTPException(status_code=404, detail="Season not found")
+    elif normalized_season and not any(
+        get_season(competition["competition_key"], normalized_season)
+        for competition in get_competitions()
+    ):
+        raise HTTPException(status_code=404, detail="Season not found")
+    return normalized_competition, normalized_season
 
 
 @api.post("/prediction")
 def create_or_update_prediction(data: PredictionData):
-    prediction = data.prediction.strip().lower()
-    if data.telegram_id <= 0 or data.match_id <= 0:
-        raise HTTPException(status_code=400, detail="Invalid telegram_id or match_id")
-    if prediction not in {"home", "draw", "away"}:
-        raise HTTPException(status_code=400, detail="Invalid prediction")
+    if data.telegram_id <= 0:
+        raise HTTPException(status_code=400, detail="Invalid telegram_id")
+    try:
+        request = normalize_prediction_request(data)
+    except (AttributeError, ValueError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
-    match = prediction_match(data.match_id)
+    competition_key, season_key = validate_prediction_scope(
+        request["competition_key"], request["season_key"]
+    )
+    try:
+        match = get_match_for_season(competition_key, season_key, request["match_id"])
+    except CompetitionDataProviderError as error:
+        raise HTTPException(status_code=502, detail="Prediction match provider unavailable") from error
     if match is None:
         raise HTTPException(status_code=404, detail="Match not found")
     if prediction_is_locked(match):
         raise HTTPException(status_code=409, detail="Prediction is locked")
 
-    save_prediction(data.telegram_id, data.match_id, prediction)
-    predictions = get_user_predictions(data.telegram_id)
+    try:
+        save_prediction_v2(
+            data.telegram_id,
+            competition_key,
+            season_key,
+            request["match_id"],
+            request["prediction_type"],
+            request["predicted_result"],
+            request["home_score"],
+            request["away_score"],
+        )
+        predictions = get_user_predictions_v2(data.telegram_id)
+    except sqlite3.Error as error:
+        raise HTTPException(status_code=503, detail="Prediction storage unavailable") from error
     return {"success": True, "count": len(predictions), "predictions": predictions}
 
 
 @api.get("/predictions/{telegram_id}")
-def get_predictions(telegram_id: int):
+def get_predictions(
+    telegram_id: int,
+    competition_key: str | None = Query(None),
+    season_key: str | None = Query(None),
+):
     if telegram_id <= 0:
         raise HTTPException(status_code=400, detail="Invalid telegram_id")
-    predictions = get_user_predictions(telegram_id)
+    competition_key, season_key = normalize_prediction_filters(competition_key, season_key)
+    try:
+        predictions = get_user_predictions_v2(telegram_id, competition_key, season_key)
+    except sqlite3.Error as error:
+        raise HTTPException(status_code=503, detail="Prediction storage unavailable") from error
     return {"count": len(predictions), "predictions": predictions}
 
 
 @api.get("/prediction-stats/{telegram_id}")
-def prediction_stats(telegram_id: int):
+def prediction_stats(
+    telegram_id: int,
+    competition_key: str | None = Query(None),
+    season_key: str | None = Query(None),
+):
     if telegram_id <= 0:
         raise HTTPException(status_code=400, detail="Invalid telegram_id")
-    return get_prediction_stats(telegram_id, get_real_matches(status="all"))
+    competition_key, season_key = normalize_prediction_filters(competition_key, season_key)
+    try:
+        predictions = get_user_predictions_v2(telegram_id, competition_key, season_key)
+    except sqlite3.Error as error:
+        raise HTTPException(status_code=503, detail="Prediction storage unavailable") from error
+
+    matches_by_identity = {}
+    for prediction in predictions:
+        identity = (
+            prediction["competition_key"],
+            prediction["season_key"],
+            prediction["match_id"],
+        )
+        stored_competition = get_competition(prediction["competition_key"])
+        stored_season = get_season(prediction["competition_key"], prediction["season_key"])
+        if (
+            not stored_competition
+            or not stored_season
+            or stored_competition.get("supports_predictions") is not True
+        ):
+            matches_by_identity[identity] = None
+            continue
+        try:
+            matches_by_identity[identity] = get_match_for_season(*identity)
+        except CompetitionDataProviderError as error:
+            raise HTTPException(
+                status_code=502, detail="Prediction match provider unavailable"
+            ) from error
+
+    return calculate_prediction_stats(predictions, matches_by_identity)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
