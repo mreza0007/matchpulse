@@ -31,6 +31,12 @@ from competition_data_service import (
 from season_service import get_season, get_seasons
 from news_service import filter_news
 from prediction_service import prediction_is_locked, prediction_is_predictable
+from prediction_evaluation_service import (
+    calculate_prediction_stats,
+    evaluate_predictions,
+    public_display_name,
+    resolve_prediction_matches,
+)
 from real_data_service import get_match_events, get_real_matches, get_real_teams, get_worldcup_summary
 from services.worldcup_adapter import get_match_live_from_worldcup_wrapper, start_worldcup_wrapper_poller
 
@@ -46,8 +52,9 @@ from db_service import (
     get_reminders_from_db,
     get_all_reminders_from_db,
     delete_reminder_from_db,
-    calculate_prediction_stats,
+    get_predictions_v2,
     get_user_predictions_v2,
+    get_users_by_telegram_ids,
     save_prediction_v2,
     validate_prediction_shape,
 )
@@ -706,6 +713,45 @@ def normalize_prediction_filters(competition_key, season_key):
     return normalized_competition, normalized_season
 
 
+def prediction_scope_supports_evaluation(prediction):
+    competition = get_competition(prediction.get("competition_key"))
+    season = get_season(
+        prediction.get("competition_key"), prediction.get("season_key")
+    )
+    return bool(
+        competition
+        and season
+        and competition.get("supports_predictions") is True
+    )
+
+
+def resolve_prediction_evaluations(predictions):
+    matches_by_identity, evaluation_errors = resolve_prediction_matches(
+        predictions,
+        get_match_for_season,
+        CompetitionDataProviderError,
+        should_resolve=prediction_scope_supports_evaluation,
+    )
+    evaluations, stats = evaluate_predictions(predictions, matches_by_identity)
+    return evaluations, stats, evaluation_errors
+
+
+def prediction_history_item(prediction, evaluation):
+    return {
+        "competition_key": prediction["competition_key"],
+        "season_key": prediction["season_key"],
+        "match_id": prediction["match_id"],
+        "prediction_type": prediction["prediction_type"],
+        "predicted_result": prediction["predicted_result"],
+        "home_score": prediction["home_score"],
+        "away_score": prediction["away_score"],
+        "points_awarded": prediction["points_awarded"],
+        "created_at": prediction["created_at"],
+        "updated_at": prediction["updated_at"],
+        "evaluation": evaluation,
+    }
+
+
 @api.post("/prediction")
 def create_or_update_prediction(data: PredictionData):
     if data.telegram_id <= 0:
@@ -760,6 +806,103 @@ def get_predictions(
     return {"count": len(predictions), "predictions": predictions}
 
 
+@api.get("/prediction-history/{telegram_id}")
+def prediction_history(
+    telegram_id: int,
+    competition_key: str | None = Query(None),
+    season_key: str | None = Query(None),
+):
+    if telegram_id <= 0:
+        raise HTTPException(status_code=400, detail="Invalid telegram_id")
+    competition_key, season_key = normalize_prediction_filters(
+        competition_key, season_key
+    )
+    try:
+        predictions = get_user_predictions_v2(
+            telegram_id, competition_key, season_key
+        )
+    except sqlite3.Error as error:
+        raise HTTPException(
+            status_code=503, detail="Prediction storage unavailable"
+        ) from error
+
+    evaluations, _, evaluation_errors = resolve_prediction_evaluations(predictions)
+    history = [
+        prediction_history_item(prediction, evaluation)
+        for prediction, evaluation in zip(predictions, evaluations)
+    ]
+    return {
+        "count": len(history),
+        "evaluation_errors": evaluation_errors,
+        "history": history,
+    }
+
+
+@api.get("/prediction-leaderboard")
+def prediction_leaderboard(
+    competition_key: str | None = Query(None),
+    season_key: str | None = Query(None),
+):
+    competition_key, season_key = normalize_prediction_filters(
+        competition_key, season_key
+    )
+    try:
+        predictions = get_predictions_v2(competition_key, season_key)
+        predictions = [
+            prediction
+            for prediction in predictions
+            if prediction_scope_supports_evaluation(prediction)
+        ]
+        users = get_users_by_telegram_ids(
+            prediction["telegram_id"] for prediction in predictions
+        )
+    except sqlite3.Error as error:
+        raise HTTPException(
+            status_code=503, detail="Prediction storage unavailable"
+        ) from error
+
+    matches_by_identity, evaluation_errors = resolve_prediction_matches(
+        predictions,
+        get_match_for_season,
+        CompetitionDataProviderError,
+        should_resolve=prediction_scope_supports_evaluation,
+    )
+
+    predictions_by_user = {}
+    for prediction in predictions:
+        predictions_by_user.setdefault(prediction["telegram_id"], []).append(prediction)
+
+    leaderboard = []
+    for telegram_id, user_predictions in predictions_by_user.items():
+        stats = calculate_prediction_stats(user_predictions, matches_by_identity)
+        leaderboard.append({
+            "display_name": public_display_name(users.get(telegram_id)),
+            **stats,
+        })
+
+    leaderboard.sort(
+        key=lambda entry: (
+            -entry["points"],
+            -entry["correct"],
+            entry["display_name"].casefold(),
+        )
+    )
+    rank = 0
+    previous_rank_values = None
+    for entry in leaderboard:
+        rank_values = (entry["points"], entry["correct"])
+        if rank_values != previous_rank_values:
+            rank += 1
+            previous_rank_values = rank_values
+        entry["rank"] = rank
+
+    return {
+        "count": len(leaderboard),
+        "evaluation_errors": evaluation_errors,
+        "leaderboard": leaderboard,
+    }
+
+
 @api.get("/prediction-stats/{telegram_id}")
 def prediction_stats(
     telegram_id: int,
@@ -774,30 +917,12 @@ def prediction_stats(
     except sqlite3.Error as error:
         raise HTTPException(status_code=503, detail="Prediction storage unavailable") from error
 
-    matches_by_identity = {}
-    for prediction in predictions:
-        identity = (
-            prediction["competition_key"],
-            prediction["season_key"],
-            prediction["match_id"],
+    _, stats, evaluation_errors = resolve_prediction_evaluations(predictions)
+    if evaluation_errors:
+        raise HTTPException(
+            status_code=502, detail="Prediction match provider unavailable"
         )
-        stored_competition = get_competition(prediction["competition_key"])
-        stored_season = get_season(prediction["competition_key"], prediction["season_key"])
-        if (
-            not stored_competition
-            or not stored_season
-            or stored_competition.get("supports_predictions") is not True
-        ):
-            matches_by_identity[identity] = None
-            continue
-        try:
-            matches_by_identity[identity] = get_match_for_season(*identity)
-        except CompetitionDataProviderError as error:
-            raise HTTPException(
-                status_code=502, detail="Prediction match provider unavailable"
-            ) from error
-
-    return calculate_prediction_stats(predictions, matches_by_identity)
+    return stats
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 from prediction_schema import ensure_prediction_v2_schema
+from prediction_evaluation_service import canonical_prediction_result, calculate_prediction_stats
 
 DB_PATH = Path(__file__).parent / "matchpulse.db"
 
@@ -263,78 +264,54 @@ def get_user_predictions_v2(telegram_id, competition_key=None, season_key=None):
     return [prediction_v2_from_row(row) for row in rows]
 
 
-def canonical_prediction_result(match):
-    if not isinstance(match, dict):
-        return None
+def get_predictions_v2(competition_key=None, season_key=None):
+    clauses = []
+    parameters = []
+    if competition_key is not None:
+        clauses.append("competition_key = ?")
+        parameters.append(competition_key)
+    if season_key is not None:
+        clauses.append("season_key = ?")
+        parameters.append(season_key)
 
-    status = str(match.get("status") or "").strip().lower().replace("-", "_").replace(" ", "_")
-    if match.get("is_finished") is not True and status not in {
-        "finished", "finish", "ft", "full_time", "fulltime", "completed", "complete", "final",
-    }:
-        return None
-
-    result = str(match.get("result") or "").strip().lower()
-    if result in ALLOWED_PREDICTIONS:
-        return result
-
-    penalty_winner = str(match.get("penalty_winner_side") or "").strip().lower()
-    if penalty_winner in {"home", "away"}:
-        return penalty_winner
-
-    score_source = str(match.get("score_source") or "").strip().lower()
-    trusted_score_sources = {
-        "raw_final", "raw_score", "events", "scorers", "worldcup_wrapper", "varzesh3", "score_override",
-    }
-    if score_source not in trusted_score_sources:
-        return None
-
-    score = match.get("score") if isinstance(match.get("score"), dict) else {}
-    home_score = match.get("home_score")
-    away_score = match.get("away_score")
-    if home_score is None:
-        home_score = score.get("home")
-    if away_score is None:
-        away_score = score.get("away")
-
+    query = PREDICTION_V2_SELECT
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+    query += " ORDER BY updated_at DESC, id DESC"
+    conn = get_connection()
     try:
-        home_score = int(home_score)
-        away_score = int(away_score)
-    except (TypeError, ValueError):
-        return None
-
-    if home_score > away_score:
-        return "home"
-    if away_score > home_score:
-        return "away"
-    return "draw"
+        rows = conn.execute(query, parameters).fetchall()
+    finally:
+        conn.close()
+    return [prediction_v2_from_row(row) for row in rows]
 
 
-def calculate_prediction_stats(predictions, matches_by_identity):
-    correct = 0
-    wrong = 0
-    pending = 0
+def get_users_by_telegram_ids(telegram_ids):
+    normalized_ids = sorted(set(telegram_ids))
+    if not normalized_ids:
+        return {}
 
-    for prediction in predictions:
-        identity = (
-            prediction["competition_key"],
-            prediction["season_key"],
-            prediction["match_id"],
-        )
-        match = matches_by_identity.get(identity)
-        result = canonical_prediction_result(match)
-        if result is None:
-            pending += 1
-        elif prediction["predicted_result"] == result:
-            correct += 1
-        else:
-            wrong += 1
-
+    placeholders = ", ".join("?" for _ in normalized_ids)
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT telegram_id, first_name, last_name, username
+            FROM users
+            WHERE telegram_id IN ({placeholders})
+            """,
+            normalized_ids,
+        ).fetchall()
+    finally:
+        conn.close()
     return {
-        "points": correct * 3,
-        "correct": correct,
-        "wrong": wrong,
-        "pending": pending,
-        "total": len(predictions),
+        row[0]: {
+            "telegram_id": row[0],
+            "first_name": row[1],
+            "last_name": row[2],
+            "username": row[3],
+        }
+        for row in rows
     }
 
 
