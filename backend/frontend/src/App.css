@@ -3438,6 +3438,295 @@ h1 {
   font-weight: 750;
 }
 
+.predictions-page,
+.prediction-competition-section,
+.prediction-match-list,
+.prediction-match-card,
+.predictions-skeleton {
+  display: grid;
+}
+
+.predictions-page {
+  gap: 16px;
+}
+
+.predictions-page > h1,
+.prediction-competition-section h2 {
+  margin: 0;
+}
+
+.predictions-page > h1 {
+  font-size: 22px;
+}
+
+.prediction-summary {
+  display: grid;
+  grid-template-columns: minmax(88px, 0.7fr) minmax(0, 2fr);
+  gap: 10px;
+  padding: 13px;
+  border: 1px solid rgba(var(--theme-accent-rgb), 0.18);
+  border-radius: 14px;
+  background: rgba(var(--theme-accent-rgb), 0.07);
+}
+
+.prediction-summary-primary,
+.prediction-summary-grid span {
+  display: grid;
+  align-content: center;
+  gap: 3px;
+}
+
+.prediction-summary-primary {
+  justify-items: center;
+  border-inline-end: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.prediction-summary-primary span,
+.prediction-summary-grid span {
+  color: var(--theme-muted);
+  font-size: 9px;
+}
+
+.prediction-summary-primary strong {
+  color: var(--theme-accent-soft);
+  font-size: 24px;
+}
+
+.prediction-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.prediction-summary-grid span {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.prediction-summary-grid strong {
+  color: var(--theme-text);
+  font-size: 12px;
+}
+
+.prediction-competition-section {
+  gap: 9px;
+}
+
+.prediction-competition-section h2 {
+  color: var(--theme-muted);
+  font-size: 13px;
+}
+
+.prediction-competition-selector {
+  display: flex;
+  gap: 8px;
+  padding-bottom: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.prediction-competition-selector::-webkit-scrollbar {
+  display: none;
+}
+
+.prediction-competition-selector > button {
+  display: grid;
+  grid-template-columns: 34px minmax(112px, 1fr);
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-width: 176px;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--theme-text);
+  font: inherit;
+  text-align: start;
+}
+
+.prediction-competition-selector > button.active {
+  border-color: rgba(var(--theme-accent-rgb), 0.28);
+  background: rgba(var(--theme-accent-rgb), 0.12);
+}
+
+.prediction-competition-selector .competition-directory-logo,
+.prediction-competition-selector .competition-directory-logo-fallback {
+  width: 32px;
+  height: 32px;
+}
+
+.prediction-competition-selector button > span:last-child {
+  display: grid;
+  gap: 3px;
+}
+
+.prediction-competition-selector strong {
+  font-size: 11px;
+}
+
+.prediction-competition-selector small {
+  color: var(--theme-muted);
+  font-size: 9px;
+}
+
+.prediction-match-list,
+.predictions-skeleton {
+  gap: 10px;
+}
+
+.prediction-match-list.loading {
+  opacity: 0.6;
+}
+
+.prediction-match-card {
+  gap: 12px;
+  padding: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.prediction-match-card.locked {
+  opacity: 0.72;
+}
+
+.prediction-match-context,
+.prediction-teams,
+.prediction-legacy-state,
+.prediction-card-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.prediction-match-context {
+  color: var(--theme-muted);
+  font-size: 9px;
+}
+
+.prediction-teams {
+  align-items: start;
+}
+
+.prediction-teams > div {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  width: 40%;
+  text-align: center;
+}
+
+.prediction-teams > div strong {
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.prediction-teams > span {
+  padding-top: 11px;
+  color: var(--theme-muted);
+  font-size: 10px;
+}
+
+.prediction-score-form {
+  display: grid;
+  grid-template-columns: minmax(62px, 1fr) auto minmax(62px, 1fr) minmax(90px, 1.3fr);
+  align-items: end;
+  gap: 7px;
+}
+
+.prediction-score-form label {
+  display: grid;
+  gap: 5px;
+  color: var(--theme-muted);
+  font-size: 8px;
+  text-align: center;
+}
+
+.prediction-score-form input {
+  width: 100%;
+  height: 40px;
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  outline: 0;
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--theme-text);
+  font: inherit;
+  font-size: 17px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.prediction-score-form input:focus {
+  border-color: rgba(var(--theme-accent-rgb), 0.45);
+}
+
+.prediction-score-form button,
+.prediction-legacy-state button,
+.predictions-error-state button {
+  min-height: 38px;
+  padding-inline: 10px;
+  border: 1px solid rgba(var(--theme-accent-rgb), 0.25);
+  border-radius: 10px;
+  background: rgba(var(--theme-accent-rgb), 0.14);
+  color: var(--theme-accent-soft);
+  font: inherit;
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.prediction-score-form button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.prediction-legacy-state {
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--theme-muted);
+  font-size: 10px;
+}
+
+.prediction-legacy-state strong {
+  color: var(--theme-text);
+}
+
+.prediction-card-status {
+  min-height: 14px;
+  color: var(--theme-muted);
+  font-size: 9px;
+}
+
+.prediction-card-status .success {
+  color: #72d6a0;
+}
+
+.prediction-card-status .error {
+  color: #f2a0a0;
+}
+
+.predictions-skeleton span {
+  height: 112px;
+  border-radius: 14px;
+  background: linear-gradient(100deg, rgba(255, 255, 255, 0.035) 20%, rgba(255, 255, 255, 0.085) 40%, rgba(255, 255, 255, 0.035) 60%);
+  background-size: 220% 100%;
+  animation: homeSkeleton 1.4s ease-in-out infinite;
+}
+
+.predictions-error-state,
+.predictions-auth-state {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+}
+
+.predictions-error-state p {
+  margin: 0;
+}
+
 .bottom-nav button > span {
   font-size: 15px;
   line-height: 1;
