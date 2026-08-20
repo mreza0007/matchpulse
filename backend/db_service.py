@@ -641,30 +641,40 @@ def mark_reminder_notified(telegram_id, match_id):
 
 def get_all_favorite_teams_from_db():
     conn = get_connection()
-    cursor = conn.cursor()
+    try:
+        require_favorite_teams_v2(conn)
+        rows = conn.execute(
+            """
+            SELECT id, telegram_id, competition_key, team_id, created_at
+            FROM favorite_teams
+            ORDER BY created_at, id
+            """
+        ).fetchall()
+    finally:
+        conn.close()
 
-    cursor.execute(
-        """
-        SELECT telegram_id, team_data
-        FROM favorite_teams
-        """
-    )
+    if not rows:
+        return {}
 
-    rows = cursor.fetchall()
-    conn.close()
+    identities = [
+        {
+            "id": row[0],
+            "competition_key": row[2],
+            "team_id": row[3],
+            "created_at": row[4],
+        }
+        for row in rows
+    ]
 
+    from favorite_service import resolve_favorite_identities
+
+    resolved = resolve_favorite_identities(identities)
     result = {}
 
-    for row in rows:
-        telegram_id = row[0]
-        team = prepare_favorite_team(json.loads(row[1]))
+    for row, team in zip(rows, resolved["favorite_teams"]):
+        result.setdefault(row[1], []).append(team)
 
-        if telegram_id not in result:
-            result[telegram_id] = []
-
-        result[telegram_id].append(team)
-
-    return result 
+    return result
 
 
 def has_sent_notification(notification_key):
@@ -944,36 +954,22 @@ def get_relevant_users_for_match(match):
         return []
 
     conn = get_connection()
-    cursor = conn.cursor()
+    try:
+        rows = conn.execute(
+            """
+            SELECT telegram_id
+            FROM reminders
+            WHERE match_id = ?
+            """,
+            (match_id,),
+        ).fetchall()
+    finally:
+        conn.close()
 
-    cursor.execute(
-        """
-        SELECT telegram_id
-        FROM reminders
-        WHERE match_id = ?
-        """,
-        (match_id,),
-    )
+    relevant_users.update(row[0] for row in rows)
 
-    relevant_users.update(row[0] for row in cursor.fetchall())
-
-    cursor.execute(
-        """
-        SELECT telegram_id, team_data
-        FROM favorite_teams
-        """
-    )
-
-    favorite_rows = cursor.fetchall()
-    conn.close()
-
-    for telegram_id, team_data in favorite_rows:
-        try:
-            team = json.loads(team_data)
-        except (TypeError, json.JSONDecodeError):
-            continue
-
-        if favorite_team_matches_match(team, match):
+    for telegram_id, teams in get_all_favorite_teams_from_db().items():
+        if any(favorite_team_matches_match(team, match) for team in teams):
             relevant_users.add(telegram_id)
 
     return sorted(relevant_users)
