@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { fetchNews } from "../api/news.js";
+import { fetchFavoriteNews, fetchNews } from "../api/news.js";
 import NewsCard from "../components/news/NewsCard.jsx";
 import { COMPETITIONS } from "../config/competitions.js";
 
 const CATEGORIES = [
   { key: "all", value: null, labelKey: "newsCategoryAll" },
+  { key: "favorites", value: null, labelKey: "newsCategoryFavorites" },
   { key: "iran", value: "iran", labelKey: "newsCategoryIran" },
   { key: "world", value: "world", labelKey: "newsCategoryWorld" },
   { key: "national", value: "national", labelKey: "newsCategoryNational" },
@@ -34,54 +35,84 @@ function trustedCompetitionLabels(item, lang) {
   });
 }
 
-export default function NewsPage({ lang, t }) {
+export default function NewsPage({ lang, t, telegramId }) {
   const [selectedCategory, setSelectedCategory] = useState("all");
-  const [result, setResult] = useState({ items: [], loading: true, failed: false });
+  const [result, setResult] = useState({ items: [], loading: true, error: null });
   const [retryVersion, setRetryVersion] = useState(0);
   const cache = useRef(new Map());
   const requestVersion = useRef(0);
   const selectedOption = CATEGORIES.find((category) => category.key === selectedCategory);
+  const isFavoritesFeed = selectedCategory === "favorites";
+  const hasUsableTelegramId = (
+    (Number.isSafeInteger(telegramId) && telegramId > 0)
+    || (typeof telegramId === "string" && /^[1-9]\d*$/.test(telegramId))
+  );
+  const cacheKey = isFavoritesFeed
+    ? `favorites:${String(telegramId)}`
+    : `normal:${selectedCategory}`;
 
   useEffect(() => {
-    const cachedItems = cache.current.get(selectedCategory);
-    if (cachedItems) {
-      setResult({ items: cachedItems, loading: false, failed: false });
+    if (isFavoritesFeed && !hasUsableTelegramId) return undefined;
+
+    if (cache.current.has(cacheKey)) {
+      setResult({ items: cache.current.get(cacheKey), loading: false, error: null });
       return undefined;
     }
 
     const controller = new AbortController();
     const currentRequest = requestVersion.current + 1;
     requestVersion.current = currentRequest;
-    setResult({ items: [], loading: true, failed: false });
+    setResult({ items: [], loading: true, error: null });
 
-    fetchNews({ category: selectedOption?.value, signal: controller.signal })
-      .then((response) => {
-        if (!response.ok) throw new Error(`News request failed: ${response.status}`);
-        return response.json();
+    const request = isFavoritesFeed
+      ? fetchFavoriteNews(telegramId, { signal: controller.signal })
+      : fetchNews({ category: selectedOption?.value, signal: controller.signal });
+
+    request
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const error = new Error(`News request failed: ${response.status}`);
+          error.status = response.status;
+          throw error;
+        }
+        return payload;
       })
       .then((payload) => {
         if (controller.signal.aborted || requestVersion.current !== currentRequest) return;
         const items = Array.isArray(payload?.news) ? payload.news : [];
-        cache.current.set(selectedCategory, items);
-        setResult({ items, loading: false, failed: false });
+        cache.current.set(cacheKey, items);
+        setResult({ items, loading: false, error: null });
       })
       .catch((error) => {
         if (error.name === "AbortError" || requestVersion.current !== currentRequest) return;
         console.error("Failed to load News:", error);
-        setResult({ items: [], loading: false, failed: true });
+        setResult({
+          items: [],
+          loading: false,
+          error: isFavoritesFeed && error.status === 503 ? "favorites-update" : "generic",
+        });
       });
 
     return () => controller.abort();
-  }, [retryVersion, selectedCategory, selectedOption?.value]);
+  }, [
+    cacheKey,
+    hasUsableTelegramId,
+    isFavoritesFeed,
+    retryVersion,
+    selectedOption?.value,
+    telegramId,
+  ]);
 
   const selectCategory = (categoryKey) => {
     if (categoryKey === selectedCategory) return;
     setSelectedCategory(categoryKey);
   };
   const retry = () => {
-    cache.current.delete(selectedCategory);
+    cache.current.delete(cacheKey);
     setRetryVersion((version) => version + 1);
   };
+  const identityRequired = isFavoritesFeed && !hasUsableTelegramId;
 
   return (
     <section className="structured-news-page">
@@ -102,20 +133,30 @@ export default function NewsPage({ lang, t }) {
         ))}
       </div>
 
-      {result.loading && <NewsSkeleton />}
+      {!identityRequired && result.loading && <NewsSkeleton />}
 
-      {!result.loading && result.failed && (
+      {identityRequired && (
+        <div className="home-empty-state">{t.favoriteNewsIdentityRequired}</div>
+      )}
+
+      {!identityRequired && !result.loading && result.error && (
         <div className="home-empty-state structured-news-error">
-          <p>{t.newsLoadError}</p>
+          <p>
+            {result.error === "favorites-update"
+              ? t.favoriteNewsUpdateRequired
+              : (isFavoritesFeed ? t.favoriteNewsLoadError : t.newsLoadError)}
+          </p>
           <button onClick={retry} type="button">{t.retry}</button>
         </div>
       )}
 
-      {!result.loading && !result.failed && result.items.length === 0 && (
-        <div className="home-empty-state">{t.newsCategoryEmpty}</div>
+      {!identityRequired && !result.loading && !result.error && result.items.length === 0 && (
+        <div className="home-empty-state">
+          {isFavoritesFeed ? t.favoriteNewsEmpty : t.newsCategoryEmpty}
+        </div>
       )}
 
-      {!result.loading && !result.failed && result.items.length > 0 && (
+      {!identityRequired && !result.loading && !result.error && result.items.length > 0 && (
         <div className="structured-news-list">
           {result.items.map((item) => (
             <NewsCard

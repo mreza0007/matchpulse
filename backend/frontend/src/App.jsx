@@ -994,7 +994,7 @@ function App() {
         />
       )}
 
-      {activeTab === "news" && <NewsPage lang={lang} t={t} />}
+      {activeTab === "news" && <NewsPage lang={lang} t={t} telegramId={telegramId} />}
 
       {activeTab === "predictions" && (
         <PredictionsPage lang={lang} t={t} telegramId={telegramId} />
