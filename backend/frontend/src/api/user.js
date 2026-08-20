@@ -16,10 +16,6 @@ export function saveTelegramUser(telegramId, telegramUser) {
   });
 }
 
-export function fetchFavoriteTeams(telegramId) {
-  return request(`${API_BASE_URL}/favorite-teams/${telegramId}`);
-}
-
 export function fetchReminders(telegramId) {
   return request(`${API_BASE_URL}/reminders/${telegramId}`);
 }
@@ -30,26 +26,6 @@ export function fetchPredictions(telegramId) {
 
 export function fetchPredictionStats(telegramId) {
   return request(`${API_BASE_URL}/prediction-stats/${telegramId}`);
-}
-
-export function createFavoriteTeam(telegramId, team) {
-  return request(`${API_BASE_URL}/favorite-team`, {
-    method: "POST",
-    headers: jsonHeaders,
-    body: JSON.stringify({ telegram_id: telegramId, ...team }),
-  });
-}
-
-export function deleteFavoriteTeam(telegramId, teamId, teamKey) {
-  return request(`${API_BASE_URL}/favorite-team`, {
-    method: "DELETE",
-    headers: jsonHeaders,
-    body: JSON.stringify({
-      telegram_id: telegramId,
-      team_id: teamId,
-      team_key: teamKey,
-    }),
-  });
 }
 
 export function createReminder(telegramId, matchId) {

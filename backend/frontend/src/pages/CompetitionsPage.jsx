@@ -18,7 +18,15 @@ function CompetitionListSkeleton() {
   );
 }
 
-export default function CompetitionsPage({ lang, t }) {
+export default function CompetitionsPage({
+  favoriteIdentityKeys,
+  favoriteMessage,
+  favoritePendingKeys,
+  lang,
+  onFavoriteToggle,
+  t,
+  telegramId,
+}) {
   const [competitions, setCompetitions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
@@ -73,10 +81,15 @@ export default function CompetitionsPage({ lang, t }) {
     return (
       <CompetitionPage
         competition={selectedCompetition}
+        favoriteIdentityKeys={favoriteIdentityKeys}
+        favoriteMessage={favoriteMessage}
+        favoritePendingKeys={favoritePendingKeys}
         key={`${selectedCompetition.competition_key}:${selectedCompetition.season_key || ""}`}
         lang={lang}
         onBack={() => setSelectedCompetition(null)}
+        onFavoriteToggle={onFavoriteToggle}
         t={t}
+        telegramId={telegramId}
       />
     );
   }

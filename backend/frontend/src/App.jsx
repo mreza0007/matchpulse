@@ -9,27 +9,29 @@ import {
   fetchWorldCupSummary,
 } from "./api/football.js";
 import {
-  createFavoriteTeam,
   createReminder,
-  deleteFavoriteTeam,
   deleteReminder,
-  fetchFavoriteTeams,
   fetchPredictions,
   fetchPredictionStats,
   fetchReminders,
   savePrediction,
   saveTelegramUser,
 } from "./api/user.js";
+import {
+  addFavoriteTeam,
+  deleteFavoriteTeam,
+  fetchFavoriteTeams,
+} from "./api/favorites.js";
 import MatchCard from "./components/matches/MatchCard.jsx";
 import AppHeader from "./components/layout/AppHeader.jsx";
 import BottomNav from "./components/layout/BottomNav.jsx";
-import TeamFlag from "./components/teams/TeamFlag.jsx";
 import WorldCupArchive from "./components/worldcup/WorldCupArchive.jsx";
 import HomePage from "./pages/HomePage.jsx";
 import LivePage from "./pages/LivePage.jsx";
 import CompetitionsPage from "./pages/CompetitionsPage.jsx";
 import NewsPage from "./pages/NewsPage.jsx";
 import PredictionsPage from "./pages/PredictionsPage.jsx";
+import ProfilePage from "./pages/ProfilePage.jsx";
 import {
   getMatchScoreSignature,
   isFinishedMatch,
@@ -41,12 +43,10 @@ import {
   normalizeMatchPayload,
   toPersianDigits,
 } from "./utils/matches.js";
-import {
-  formatTehranMatchDateTime,
-  getKickoffTime,
-  groupMatchesByDate,
-} from "./utils/dates.js";
+import { getKickoffTime, groupMatchesByDate } from "./utils/dates.js";
 import { normalizeTeamKey } from "./utils/teams.js";
+
+const EMPTY_SET = new Set();
 
 function BrandLogo({ competition, lang }) {
   const [hasError, setHasError] = useState(false);
@@ -69,30 +69,14 @@ function BrandLogo({ competition, lang }) {
   );
 }
 
+function favoriteIdentityKey(competitionKey, teamId) {
+  return `${competitionKey}:${String(teamId)}`;
+}
 
-function TeamCard({ team, lang, t, isFavorite, onToggle }) {
-  const teamName = lang === "fa"
-    ? team.name_fa || team.name_en || team.team_name || ""
-    : team.name_en || team.name_fa || team.team_name || "";
-
-  return (
-    <article className="team-card">
-      <div className="team-card-main">
-        <span className="team-emoji">{team.emoji}</span>
-        <div>
-          <h3>{teamName}</h3>
-          <small>{isFavorite ? t.favoriteTeams : t.chooseFavorite}</small>
-        </div>
-      </div>
-      <button
-        className={`chip-btn ${isFavorite ? "active" : ""}`}
-        onClick={() => onToggle(team)}
-      >
-        <span>{isFavorite ? "\u2605" : "\u2606"}</span>
-        {isFavorite ? t.removeFavorite : t.addFavorite}
-      </button>
-    </article>
-  );
+function favoriteFailureStatus(status) {
+  if (status === 503) return "migration";
+  if (status === 502) return "provider";
+  return "error";
 }
 
 function App() {
@@ -113,6 +97,11 @@ function App() {
   const [teams, setTeams] = useState([]);
   const [favoriteTeams, setFavoriteTeams] = useState([]);
   const [favoriteMessage, setFavoriteMessage] = useState("");
+  const [favoriteStatus, setFavoriteStatus] = useState(
+    initialTelegramUser?.id ? "loading" : "idle",
+  );
+  const [favoriteMeta, setFavoriteMeta] = useState({ resolutionErrors: 0, unresolvedCount: 0 });
+  const [favoritePendingKeys, setFavoritePendingKeys] = useState(() => new Set());
   const [reminders, setReminders] = useState([]);
   const [reminderMessage, setReminderMessage] = useState("");
   const [predictionsByMatch, setPredictionsByMatch] = useState({});
@@ -129,6 +118,9 @@ function App() {
   const [scoreChangedMatchIds, setScoreChangedMatchIds] = useState(() => new Set());
   const scoreChangeTimeouts = useRef(new Map());
   const eventRequestController = useRef(null);
+  const favoriteMutationVersion = useRef(0);
+  const favoriteMutationControllers = useRef(new Set());
+  const favoriteRequestController = useRef(null);
   const predictionMutationVersion = useRef(0);
   const predictionSaveRequests = useRef(new Map());
 
@@ -143,15 +135,10 @@ function App() {
     ? t.subtitle
     : selectedCompetition.subtitles[lang] || selectedCompetition.subtitles.en;
 
-  const favoriteTeamIds = useMemo(
-    () => new Set(favoriteTeams.map((team) => String(team.id))),
-    [favoriteTeams],
-  );
-
-  const favoriteTeamKeys = useMemo(
-    () => new Set(
-      favoriteTeams.map((team) => normalizeTeamKey(team.team_key || team.name_en || team.name_fa || team.team_name || team.id)),
-    ),
+  const favoriteIdentityKeys = useMemo(
+    () => new Set(favoriteTeams.map(
+      (team) => `${team.competition_key}:${String(team.team_id)}`,
+    )),
     [favoriteTeams],
   );
 
@@ -181,20 +168,6 @@ function App() {
     });
     return lookup;
   }, [teams]);
-
-  const teamPayload = (team) => ({
-    team_id: team.id,
-    team_key: team.team_key || normalizeTeamKey(team.name_en || team.name_fa || team.team_name || team.id),
-    team_name: team.team_name || team.name_en || team.name_fa,
-    name_en: team.name_en || team.team_name || team.name_fa,
-    name_fa: team.name_fa || team.team_name || team.name_en,
-    emoji: team.emoji || team.flag || "\u26bd",
-  });
-
-  const isTeamFavorite = (team) => (
-    favoriteTeamIds.has(String(team.id)) ||
-    favoriteTeamKeys.has(normalizeTeamKey(team.team_key || team.name_en || team.name_fa || team.team_name || team.id))
-  );
 
   const getTeamDisplayName = (team) => (
     lang === "fa"
@@ -426,7 +399,12 @@ function App() {
     return () => requestController.abort();
   }, [selectedCompetition]);
 
-  useEffect(() => () => eventRequestController.current?.abort(), []);
+  useEffect(() => () => {
+    eventRequestController.current?.abort();
+    favoriteRequestController.current?.abort();
+    favoriteMutationControllers.current.forEach((controller) => controller.abort());
+    favoriteMutationControllers.current.clear();
+  }, []);
 
   useEffect(() => {
     if (!telegramId) return;
@@ -441,14 +419,6 @@ function App() {
         console.error("Failed to save Telegram user:", error);
         setIsUserSaved(false);
       });
-
-    fetchFavoriteTeams(telegramId)
-      .then((response) => {
-        if (!response.ok) throw new Error(`Favorites request failed: ${response.status}`);
-        return response.json();
-      })
-      .then((data) => setFavoriteTeams(Array.isArray(data.favorite_teams) ? data.favorite_teams : []))
-      .catch((error) => console.error("Failed to load favorite teams:", error));
 
     fetchReminders(telegramId)
       .then((response) => {
@@ -487,6 +457,50 @@ function App() {
       }))
       .catch((error) => console.error("Failed to load prediction stats:", error));
   }, [telegramId, telegramUser]);
+
+  useEffect(() => {
+    favoriteRequestController.current?.abort();
+    if (!telegramId) {
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const requestVersion = favoriteMutationVersion.current;
+    favoriteRequestController.current = controller;
+
+    fetchFavoriteTeams(telegramId, { signal: controller.signal })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const error = new Error(`Favorites request failed: ${response.status}`);
+          error.status = response.status;
+          throw error;
+        }
+        return data;
+      })
+      .then((data) => {
+        if (controller.signal.aborted || favoriteMutationVersion.current !== requestVersion) return;
+        setFavoriteTeams(Array.isArray(data.favorite_teams) ? data.favorite_teams : []);
+        setFavoriteMeta({
+          resolutionErrors: Number(data.resolution_errors) || 0,
+          unresolvedCount: Number(data.unresolved_count) || 0,
+        });
+        setFavoriteStatus("ready");
+      })
+      .catch((error) => {
+        if (error.name === "AbortError") return;
+        if (favoriteMutationVersion.current !== requestVersion) return;
+        console.error("Failed to load favorite teams:", error);
+        setFavoriteStatus(favoriteFailureStatus(error.status));
+      })
+      .finally(() => {
+        if (favoriteRequestController.current === controller) {
+          favoriteRequestController.current = null;
+        }
+      });
+
+    return () => controller.abort();
+  }, [telegramId]);
 
   useEffect(() => {
     if (!telegramId || !predictionResultsVersion) return;
@@ -529,73 +543,136 @@ function App() {
     setScoreChangedMatchIds(new Set());
     setReminderMessage("");
     setFavoriteMessage("");
-    if (activeTab === "favorites") setActiveTab("home");
     setSelectedCompetitionKey(competitionKey);
   };
 
-  const addFavoriteTeam = (team) => {
-    if (!selectedCompetition.supportsFavorites) return;
+  const readFavoriteResponse = async (response, operation) => {
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(`${operation} failed: ${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
+    return data;
+  };
 
+  const favoriteMutationFailed = (error, fallbackMessage) => {
+    if (error.name === "AbortError") return;
+    console.error("Favorite mutation failed:", error);
+    if (error.status === 503) {
+      setFavoriteStatus("migration");
+      setFavoriteMessage(t.favoriteMigrationRequired);
+    } else if (error.status === 502) {
+      setFavoriteMessage(t.favoriteProviderError);
+    } else {
+      setFavoriteMessage(fallbackMessage);
+    }
+  };
+
+  const addScopedFavorite = (competitionKey, team) => {
     if (!telegramId) {
-      setFavoriteMessage(t.unavailable);
+      setFavoriteMessage(t.favoriteIdentityRequired);
       return;
     }
+    if (!competitionKey || team?.id === undefined || team?.id === null) return;
 
+    const teamId = String(team.id);
+    const identityKey = favoriteIdentityKey(competitionKey, teamId);
     const displayName = getTeamDisplayName(team);
+    const controller = new AbortController();
+    favoriteMutationVersion.current += 1;
+    favoriteMutationControllers.current.add(controller);
+    setFavoritePendingKeys((current) => new Set(current).add(identityKey));
+    setFavoriteMessage("");
 
-    createFavoriteTeam(telegramId, teamPayload(team))
-      .then((response) => {
-        if (!response.ok) throw new Error(`Favorite request failed: ${response.status}`);
-        return response.json();
-      })
+    addFavoriteTeam({
+      telegram_id: telegramId,
+      competition_key: competitionKey,
+      team_id: teamId,
+    }, { signal: controller.signal })
+      .then((response) => readFavoriteResponse(response, "Favorite add"))
       .then((data) => {
-        setFavoriteTeams(Array.isArray(data.favorite_teams) ? data.favorite_teams : []);
-        setFavoriteMessage(`${displayName} ${t.addedFavorite}`);
+        const favorite = data.favorite;
+        if (favorite?.competition_key && favorite?.team_id !== undefined) {
+          setFavoriteTeams((current) => {
+            const next = current.filter(
+              (item) => favoriteIdentityKey(item.competition_key, item.team_id) !== identityKey,
+            );
+            next.push(favorite);
+            return next;
+          });
+        }
+        setFavoriteMeta({
+          resolutionErrors: Number(data.resolution_errors) || 0,
+          unresolvedCount: Number(data.unresolved_count) || 0,
+        });
+        setFavoriteStatus("ready");
+        setFavoriteMessage(`${displayName} ${t.addedFavorite}`.trim());
       })
-      .catch((error) => {
-        console.error("Failed to add favorite team:", error);
-        setFavoriteMessage(t.unavailable);
+      .catch((error) => favoriteMutationFailed(error, t.favoriteAddError))
+      .finally(() => {
+        favoriteMutationControllers.current.delete(controller);
+        setFavoritePendingKeys((current) => {
+          const next = new Set(current);
+          next.delete(identityKey);
+          return next;
+        });
       });
   };
 
-  const removeFavoriteTeam = (team) => {
-    if (!selectedCompetition.supportsFavorites) return;
-
+  const removeScopedFavorite = (favorite) => {
     if (!telegramId) {
-      setFavoriteMessage(t.unavailable);
+      setFavoriteMessage(t.favoriteIdentityRequired);
       return;
     }
+    if (!favorite?.competition_key || favorite.team_id === undefined || favorite.team_id === null) return;
 
-    const teamId = typeof team === "object" ? team.id : team;
-    const existingTeam = favoriteTeams.find((item) => String(item.id) === String(teamId)) || team;
-    const displayName = typeof existingTeam === "object" ? getTeamDisplayName(existingTeam) : "";
+    const teamId = String(favorite.team_id);
+    const identityKey = favoriteIdentityKey(favorite.competition_key, teamId);
+    const displayName = getTeamDisplayName(favorite);
+    const controller = new AbortController();
+    favoriteMutationVersion.current += 1;
+    favoriteMutationControllers.current.add(controller);
+    setFavoritePendingKeys((current) => new Set(current).add(identityKey));
+    setFavoriteMessage("");
 
-    deleteFavoriteTeam(
-      telegramId,
-      teamId,
-      typeof existingTeam === "object"
-        ? existingTeam.team_key || normalizeTeamKey(existingTeam.name_en || existingTeam.name_fa || existingTeam.team_name || existingTeam.id)
-        : "",
-    )
-      .then((response) => {
-        if (!response.ok) throw new Error(`Favorite delete failed: ${response.status}`);
-        return response.json();
-      })
+    deleteFavoriteTeam({
+      telegram_id: telegramId,
+      competition_key: favorite.competition_key,
+      team_id: teamId,
+    }, { signal: controller.signal })
+      .then((response) => readFavoriteResponse(response, "Favorite delete"))
       .then((data) => {
-        setFavoriteTeams(Array.isArray(data.favorite_teams) ? data.favorite_teams : []);
+        setFavoriteTeams((current) => current.filter(
+          (item) => favoriteIdentityKey(item.competition_key, item.team_id) !== identityKey,
+        ));
+        setFavoriteMeta({
+          resolutionErrors: Number(data.resolution_errors) || 0,
+          unresolvedCount: Number(data.unresolved_count) || 0,
+        });
+        setFavoriteStatus("ready");
         setFavoriteMessage(`${displayName} ${t.removedFavorite}`.trim());
       })
-      .catch((error) => {
-        console.error("Failed to remove favorite team:", error);
-        setFavoriteMessage(t.unavailable);
+      .catch((error) => favoriteMutationFailed(error, t.favoriteRemoveError))
+      .finally(() => {
+        favoriteMutationControllers.current.delete(controller);
+        setFavoritePendingKeys((current) => {
+          const next = new Set(current);
+          next.delete(identityKey);
+          return next;
+        });
       });
   };
 
-  const toggleFavoriteTeam = (team) => {
-    if (isTeamFavorite(team)) {
-      removeFavoriteTeam(team);
+  const toggleScopedFavorite = (competitionKey, team) => {
+    const identityKey = favoriteIdentityKey(competitionKey, team.id);
+    if (favoriteIdentityKeys.has(identityKey)) {
+      const favorite = favoriteTeams.find(
+        (item) => favoriteIdentityKey(item.competition_key, item.team_id) === identityKey,
+      );
+      if (favorite) removeScopedFavorite(favorite);
     } else {
-      addFavoriteTeam(team);
+      addScopedFavorite(competitionKey, team);
     }
   };
 
@@ -803,14 +880,6 @@ function App() {
     awayTeam: teamsByName.get(match.away_en) || teamsByName.get(match.away_fa) || teamFromMatch(match, "away"),
   });
 
-  const profileName = telegramUser
-    ? `${telegramUser.first_name || ""} ${telegramUser.last_name || ""}`.trim()
-    : t.profileTitle;
-
-  const profileUsername = telegramUser?.username
-    ? `@${telegramUser.username}`
-    : t.noUsername;
-
   const heroStats = selectedCompetition.fixedStats
     ? [
         { key: "teams", value: selectedCompetition.fixedStats.teams, label: t.teams },
@@ -837,9 +906,8 @@ function App() {
         isReminderActive={reminderIds.has(match.id)}
         homeTeam={homeTeam}
         awayTeam={awayTeam}
-        favoriteTeamIds={favoriteTeamIds}
-        favoriteTeamKeys={favoriteTeamKeys}
-        onFavoriteToggle={toggleFavoriteTeam}
+        favoriteTeamIds={EMPTY_SET}
+        favoriteTeamKeys={EMPTY_SET}
         onDetailsClick={handleMatchDetailsClick}
         isExpanded={selectedMatchId === match.id}
         events={matchEventsById[match.id] || []}
@@ -855,7 +923,7 @@ function App() {
         predictionForceLocked={predictionLockedMatchIds.has(matchKey)}
         {...options}
         showReminder={selectedCompetition.supportsReminders && (options.showReminder ?? true)}
-        showFavorites={selectedCompetition.supportsFavorites}
+        showFavorites={false}
         showPredictions={selectedCompetition.supportsPredictions}
       />
     );
@@ -914,7 +982,17 @@ function App() {
 
       {activeTab === "live" && <LivePage lang={lang} t={t} />}
 
-      {activeTab === "competitions" && <CompetitionsPage lang={lang} t={t} />}
+      {activeTab === "competitions" && (
+        <CompetitionsPage
+          favoriteMessage={favoriteMessage}
+          favoriteIdentityKeys={favoriteIdentityKeys}
+          favoritePendingKeys={favoritePendingKeys}
+          lang={lang}
+          onFavoriteToggle={toggleScopedFavorite}
+          t={t}
+          telegramId={telegramId}
+        />
+      )}
 
       {activeTab === "news" && <NewsPage lang={lang} t={t} />}
 
@@ -993,172 +1071,23 @@ function App() {
         </section>
       )}
 
-      {activeTab === "favorites" && selectedCompetition.supportsFavorites && (
-        <section className="section">
-          <div className="section-header">
-            <h2>{t.favoriteTeams}</h2>
-          </div>
-
-          {favoriteMessage && <p className="status-message">{favoriteMessage}</p>}
-
-          <div className="profile-list favorites-panel">
-            <div className="profile-list-header">
-              <h3>{t.favoriteTeams}</h3>
-              <span>{favoriteTeams.length}</span>
-            </div>
-
-            {favoriteTeams.length === 0 && <p>{t.noFavorites}</p>}
-            {favoriteTeams.map((team) => (
-              <div className="profile-item" key={team.id}>
-                <span>{team.emoji || team.flag || "\u26bd"}</span>
-                <div className="profile-item-text">
-                  <strong>{getTeamDisplayName(team)}</strong>
-                </div>
-                {selectedCompetition.supportsFavorites && (
-                  <button
-                    className="chip-btn profile-remove-btn"
-                    onClick={() => removeFavoriteTeam(team)}
-                  >
-                    {t.removeFavorite}
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-
-          <div className="section-header inline-section-header">
-            <h2>{t.chooseFavorite}</h2>
-          </div>
-
-          <div className="news-list">
-            {teams.length === 0 && <p>{t.noFavorites}</p>}
-            {teams.map((team) => (
-              <TeamCard
-                key={team.id}
-                team={team}
-                lang={lang}
-                t={t}
-                isFavorite={isTeamFavorite(team)}
-                onToggle={toggleFavoriteTeam}
-              />
-            ))}
-          </div>
-        </section>
-      )}
-
       {activeTab === "profile" && (
-        <section className="section profile-section">
-          <article className="profile-card">
-            <div className="profile-header">
-              <div className="avatar">
-                {telegramUser?.photo_url ? (
-                  <img src={telegramUser.photo_url} alt={profileName || t.telegramUser} />
-                ) : (
-                  "MP"
-                )}
-              </div>
-
-              <div>
-                <p className="eyebrow">{t.telegramUser}</p>
-                <h2>{profileName || t.telegramUser}</h2>
-                <p>{telegramUser ? profileUsername : t.profileText}</p>
-              </div>
-            </div>
-
-            <div className="profile-grid">
-              <div>
-                <span>{t.telegramId}</span>
-                <strong>{telegramUser?.id || t.unavailable}</strong>
-              </div>
-              <div>
-                <span>{t.username}</span>
-                <strong>{telegramUser ? profileUsername : t.unavailable}</strong>
-              </div>
-              <div>
-                <span>{t.language}</span>
-                <strong>{telegramUser?.language_code || t.unavailable}</strong>
-              </div>
-              <div>
-                <span>{t.profile}</span>
-                <strong>{telegramUser ? (isUserSaved ? `✅ ${t.saved}` : `⏳ ${t.notSaved}`) : t.unavailable}</strong>
-              </div>
-            </div>
-
-            <div className="prediction-stats-card">
-              <div className="prediction-stats-heading">
-                <span>{t.predictionPoints}</span>
-                <strong>{predictionStats.points}</strong>
-              </div>
-              <div className="prediction-stats-grid">
-                <span>{t.predictionCorrect}<strong>{predictionStats.correct}</strong></span>
-                <span>{t.predictionWrong}<strong>{predictionStats.wrong}</strong></span>
-                <span>{t.predictionPending}<strong>{predictionStats.pending}</strong></span>
-              </div>
-            </div>
-
-            <div className="profile-list">
-              <div className="profile-list-header">
-                <h3>⭐ {t.favoriteTeams}</h3>
-                <span>{favoriteTeams.length}</span>
-              </div>
-
-              {favoriteTeams.length === 0 && <p>{t.noFavorites}</p>}
-              {favoriteTeams.map((team) => (
-                <div className="profile-item" key={team.id}>
-                  <span>{team.emoji || team.flag || "\u26bd"}</span>
-                  <div className="profile-item-text">
-                    <strong>{getTeamDisplayName(team)}</strong>
-                  </div>
-                  {selectedCompetition.supportsFavorites && (
-                    <button
-                      className="chip-btn profile-remove-btn"
-                      onClick={() => removeFavoriteTeam(team)}
-                    >
-                      {t.removeFavorite}
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            <div className="profile-list">
-              <div className="profile-list-header">
-                <h3>🔔 {t.activeReminders}</h3>
-                <span>{reminders.length}</span>
-              </div>
-
-              {reminders.length === 0 && <p>{t.noReminders}</p>}
-              {reminders.map((match) => {
-                const reminderDateTime = formatTehranMatchDateTime(match, lang);
-
-                return (
-                  <div className="profile-item reminder-item" key={match.id}>
-                    <TeamFlag flagEmoji={match.home_flag} teamName={match.home_en} />
-                    <div className="profile-item-text">
-                      <strong>
-                        <span className="profile-reminder-match">
-                          {match.home_en}
-                          <span>{t.vs}</span>
-                          <TeamFlag flagEmoji={match.away_flag} teamName={match.away_en} />
-                          {match.away_en}
-                        </span>
-                      </strong>
-                      <small>{reminderDateTime.compact}</small>
-                    </div>
-                    {selectedCompetition.supportsReminders && (
-                      <button
-                        className="chip-btn profile-remove-btn"
-                        onClick={() => removeReminder(match.id)}
-                      >
-                        {t.cancelReminder}
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </article>
-        </section>
+        <ProfilePage
+          canRemoveReminders={selectedCompetition.supportsReminders}
+          favoriteMessage={favoriteMessage}
+          favoriteMeta={favoriteMeta}
+          favoritePendingKeys={favoritePendingKeys}
+          favoriteStatus={favoriteStatus}
+          favoriteTeams={favoriteTeams}
+          isUserSaved={isUserSaved}
+          lang={lang}
+          onRemoveFavorite={removeScopedFavorite}
+          onRemoveReminder={removeReminder}
+          predictionStats={predictionStats}
+          reminders={reminders}
+          t={t}
+          telegramUser={telegramUser}
+        />
       )}
 
       <BottomNav activeTab={activeTab} onChange={setActiveTab} />

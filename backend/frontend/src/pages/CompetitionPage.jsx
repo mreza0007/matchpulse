@@ -97,7 +97,17 @@ function teamName(team, lang) {
   return team.name_en || team.team_name || team.name_fa || "";
 }
 
-export default function CompetitionPage({ competition, lang, onBack, t }) {
+export default function CompetitionPage({
+  competition,
+  favoriteIdentityKeys,
+  favoriteMessage,
+  favoritePendingKeys,
+  lang,
+  onBack,
+  onFavoriteToggle,
+  t,
+  telegramId,
+}) {
   const isLeague = competition.format === "league";
   const isGroupKnockout = competition.format === "group_knockout";
   const hasKnockoutTab = isGroupKnockout || competition.format === "knockout_only";
@@ -470,18 +480,43 @@ export default function CompetitionPage({ competition, lang, onBack, t }) {
     if (teams.loaded && teams.items.length === 0) return <div className="home-empty-state">{t.competitionTeamsEmpty}</div>;
 
     return (
-      <div className="competition-team-grid">
-        {teams.items.map((team, index) => (
-          <div className="competition-team-row" key={team.id || team.team_key || index}>
-            <TeamFlag
-              flagEmoji={team.emoji || team.flag}
-              logoUrl={team.logo || team.logo_url || ""}
-              teamName={team.name_en || team.team_name || ""}
-            />
-            <strong>{teamName(team, lang)}</strong>
-          </div>
-        ))}
-      </div>
+      <>
+        {favoriteMessage && <p className="status-message">{favoriteMessage}</p>}
+        <div className="competition-team-grid">
+        {teams.items.map((team, index) => {
+          const hasCanonicalIdentity = team.id !== undefined && team.id !== null;
+          const identityKey = hasCanonicalIdentity
+            ? `${competition.competition_key}:${String(team.id)}`
+            : "";
+          const isFavorite = hasCanonicalIdentity && favoriteIdentityKeys.has(identityKey);
+          const isPending = hasCanonicalIdentity && favoritePendingKeys.has(identityKey);
+
+          return (
+            <div className="competition-team-row" key={team.id || team.team_key || index}>
+              <TeamFlag
+                flagEmoji={team.emoji || team.flag}
+                logoUrl={team.logo || team.logo_url || ""}
+                teamName={team.name_en || team.team_name || ""}
+              />
+              <strong>{teamName(team, lang)}</strong>
+              {hasCanonicalIdentity && (
+                <button
+                  aria-label={isFavorite ? t.removeFavorite : t.addFavorite}
+                  aria-pressed={isFavorite}
+                  className={`competition-team-favorite ${isFavorite ? "active" : ""}`}
+                  disabled={!telegramId || isPending}
+                  onClick={() => onFavoriteToggle(competition.competition_key, team)}
+                  type="button"
+                >
+                  <span aria-hidden="true">{isFavorite ? "★" : "☆"}</span>
+                  {isPending ? t.favoriteSaving : (isFavorite ? t.removeFavorite : t.addFavorite)}
+                </button>
+              )}
+            </div>
+          );
+        })}
+        </div>
+      </>
     );
   };
 

@@ -1695,6 +1695,74 @@ h1 {
   line-height: 1.9;
 }
 
+.profile-favorite-group {
+  display: grid;
+  gap: 7px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.075);
+}
+
+.profile-favorite-group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.profile-favorite-group-heading h4 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.profile-favorite-group-heading span {
+  color: var(--gold);
+  font-size: 12px;
+}
+
+.profile-favorite-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 0;
+}
+
+.profile-favorite-item.unresolved {
+  opacity: 0.78;
+}
+
+.profile-favorite-media {
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 20px;
+}
+
+.profile-favorite-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.profile-favorite-error {
+  color: #ffc2c2 !important;
+}
+
+.profile-favorite-notice {
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(243, 199, 102, 0.08);
+  color: var(--gold) !important;
+  font-size: 12px;
+}
+
 .profile-item {
   display: flex;
   align-items: center;
@@ -3112,11 +3180,44 @@ h1 {
 }
 
 .competition-team-row strong {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.competition-team-favorite {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 30px;
+  padding: 5px 7px;
+  border: 1px solid rgba(243, 199, 102, 0.2);
+  border-radius: 9px;
+  background: rgba(243, 199, 102, 0.07);
+  color: var(--theme-muted);
+  font: inherit;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.competition-team-favorite span {
+  color: var(--gold);
+  font-size: 15px;
+}
+
+.competition-team-favorite.active {
+  border-color: rgba(243, 199, 102, 0.38);
+  background: rgba(243, 199, 102, 0.14);
+  color: var(--gold);
+}
+
+.competition-team-favorite:disabled {
+  cursor: default;
+  opacity: 0.48;
 }
 
 .standings-skeleton {
