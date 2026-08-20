@@ -30,7 +30,7 @@ from competition_data_service import (
     get_teams_for_season,
 )
 from season_service import get_season, get_seasons
-from news_service import filter_news
+from news_service import filter_news, filter_news_for_favorites
 from favorite_service import (
     FavoriteTeamTypeError,
     favorite_response_item,
@@ -582,6 +582,26 @@ def favorite_storage_http_error(error):
     if isinstance(error, FavoriteTeamsV2RequiredError) and str(error) == "legacy":
         return HTTPException(status_code=503, detail="Favorites V2 migration required")
     return HTTPException(status_code=503, detail="Favorites storage unavailable")
+
+
+@api.get("/news/favorites/{telegram_id}")
+def get_favorite_news(
+    telegram_id: int,
+    category: str | None = Query(None),
+):
+    validate_favorite_telegram_id(telegram_id)
+    try:
+        identities = get_favorite_team_identities_v2_from_db(telegram_id)
+        news = filter_news_for_favorites(NEWS, identities, category=category)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except (FavoriteTeamsV2RequiredError, sqlite3.Error) as error:
+        raise favorite_storage_http_error(error) from error
+
+    return {
+        "count": len(news),
+        "news": news,
+    }
 
 
 def favorite_list_payload(telegram_id):
