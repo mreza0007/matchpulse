@@ -618,6 +618,11 @@ def favorite_list_payload(telegram_id):
 @api.post("/favorite-team")
 def save_favorite_team(data: FavoriteTeamData):
     competition, team_id, is_legacy = normalize_favorite_request(data)
+    if competition.get("supports_favorites") is not True:
+        raise HTTPException(
+            status_code=501,
+            detail="Competition favorites not supported",
+        )
     if not is_legacy and favorite_request_has_legacy_display_data(data):
         raise HTTPException(
             status_code=422,
@@ -691,6 +696,13 @@ def delete_favorite_team(data: FavoriteTeamData):
 
 @api.post("/reminder")
 def save_reminder(data: ReminderData):
+    competition = get_competition("worldcup2026")
+    if competition.get("supports_reminders") is not True:
+        raise HTTPException(
+            status_code=501,
+            detail="Competition reminders not supported",
+        )
+
     matches = get_real_matches(status="all")
     selected_match = None
 
@@ -846,7 +858,10 @@ def prediction_scope_supports_evaluation(prediction):
     return bool(
         competition
         and season
-        and competition.get("supports_predictions") is True
+        and (
+            competition.get("supports_predictions") is True
+            or competition.get("supports_prediction_history") is True
+        )
     )
 
 

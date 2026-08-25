@@ -1,8 +1,8 @@
 import { request, API_BASE_URL } from "./client.js";
 import { COMPETITIONS } from "../config/competitions.js";
 
-export function fetchWorldCupSummary() {
-  return request(`${API_BASE_URL}/worldcup/summary`);
+export function fetchWorldCupSummary(options) {
+  return request(`${API_BASE_URL}/worldcup/summary`, options);
 }
 
 export function fetchCompetitions(options) {

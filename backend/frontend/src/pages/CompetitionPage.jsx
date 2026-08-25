@@ -13,6 +13,7 @@ import KnockoutRound from "../components/competitions/KnockoutRound.jsx";
 import StandingsTable from "../components/competitions/StandingsTable.jsx";
 import MatchCard from "../components/matches/MatchCard.jsx";
 import TeamFlag from "../components/teams/TeamFlag.jsx";
+import { competitionExperience } from "../utils/competitionCapabilities.js";
 import { getKickoffTime, groupMatchesByDate } from "../utils/dates.js";
 import {
   isFutureMatchStatus,
@@ -21,6 +22,7 @@ import {
   normalizeMatchPayload,
 } from "../utils/matches.js";
 import { getCompetitionName } from "../utils/competitions.js";
+import ArchivedCompetitionPage from "./ArchivedCompetitionPage.jsx";
 
 const EMPTY_SET = new Set();
 const FORMAT_TABS = {
@@ -97,7 +99,7 @@ function teamName(team, lang) {
   return team.name_en || team.team_name || team.name_fa || "";
 }
 
-export default function CompetitionPage({
+function ActiveCompetitionPage({
   competition,
   favoriteIdentityKeys,
   favoriteMessage,
@@ -615,4 +617,12 @@ export default function CompetitionPage({
       )}
     </section>
   );
+}
+
+export default function CompetitionPage(props) {
+  if (competitionExperience(props.competition) === "archive") {
+    return <ArchivedCompetitionPage {...props} />;
+  }
+
+  return <ActiveCompetitionPage {...props} />;
 }

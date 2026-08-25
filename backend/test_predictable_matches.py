@@ -14,8 +14,8 @@ from services import generic_football_adapter
 def match_fixture(match_id, **overrides):
     match = {
         "id": match_id,
-        "competition_key": "worldcup2026",
-        "season_key": "2026",
+        "competition_key": "premier_league",
+        "season_key": "2026-2027",
         "home_en": "Home team",
         "away_en": "Away team",
         "status": "upcoming",
@@ -33,7 +33,7 @@ class PredictableMatchesRouteTests(unittest.TestCase):
     def setUpClass(cls):
         cls.client = TestClient(main.api)
 
-    def test_worldcup_route_includes_only_eligible_matches_and_preserves_order(self):
+    def test_active_route_includes_only_eligible_matches_and_preserves_order(self):
         first = match_fixture("second-in-time", marker={"source": "unchanged"})
         second = match_fixture("first-in-time", kickoff_ts=time.time() + 1800)
         excluded = [
@@ -57,13 +57,13 @@ class PredictableMatchesRouteTests(unittest.TestCase):
             return_value=[first, *excluded, second],
         ):
             response = self.client.get(
-                "/competitions/worldcup2026/seasons/2026/predictable-matches"
+                "/competitions/premier_league/seasons/2026-2027/predictable-matches"
             )
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["competition_key"], "worldcup2026")
-        self.assertEqual(payload["season_key"], "2026")
+        self.assertEqual(payload["competition_key"], "premier_league")
+        self.assertEqual(payload["season_key"], "2026-2027")
         self.assertEqual(payload["count"], 2)
         self.assertEqual(
             [match["id"] for match in payload["matches"]],
@@ -79,21 +79,21 @@ class PredictableMatchesRouteTests(unittest.TestCase):
         )
         with patch("main.get_prediction_matches_for_season", return_value=[match]):
             response = self.client.get(
-                "/competitions/worldcup2026/seasons/2026/predictable-matches"
+                "/competitions/premier_league/seasons/2026-2027/predictable-matches"
             )
         self.assertEqual(response.json()["matches"], [match])
 
     def test_valid_supported_competition_can_return_empty_list(self):
         with patch("main.get_prediction_matches_for_season", return_value=[]):
             response = self.client.get(
-                "/competitions/worldcup2026/seasons/2026/predictable-matches"
+                "/competitions/premier_league/seasons/2026-2027/predictable-matches"
             )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.json(),
             {
-                "competition_key": "worldcup2026",
-                "season_key": "2026",
+                "competition_key": "premier_league",
+                "season_key": "2026-2027",
                 "count": 0,
                 "matches": [],
             },
@@ -142,7 +142,7 @@ class PredictableMatchesRouteTests(unittest.TestCase):
             ),
         ):
             response = self.client.get(
-                "/competitions/worldcup2026/seasons/2026/predictable-matches"
+                "/competitions/premier_league/seasons/2026-2027/predictable-matches"
             )
 
         self.assertEqual(response.status_code, 502)

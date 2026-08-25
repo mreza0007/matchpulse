@@ -29,6 +29,8 @@ export const COMPETITIONS = {
   worldcup2026: {
     competitionKey: "worldcup2026",
     seasonKey: "2026",
+    status: "archived",
+    isActive: false,
     labels: {
       fa: "\u062c\u0627\u0645 \u062c\u0647\u0627\u0646\u06cc \u06f2\u06f0\u06f2\u06f6",
       en: "World Cup 2026",
@@ -41,9 +43,6 @@ export const COMPETITIONS = {
     logoSrc: "/world-cup-2026-logo.webp",
     logoFallback: "WC 2026",
     fixedStats: { teams: 48, matches: 104, cities: 16 },
-    supportsFavorites: true,
-    supportsReminders: true,
-    supportsPredictions: true,
     supportsScopedEvents: false,
   },
   premier_league: {
@@ -65,9 +64,6 @@ export const COMPETITIONS = {
     logoSrc: "",
     logoFallback: "PL",
     fixedStats: null,
-    supportsFavorites: false,
-    supportsReminders: false,
-    supportsPredictions: false,
     supportsScopedEvents: true,
   },
   persian_gulf_pro_league: genericCompetitionConfig(

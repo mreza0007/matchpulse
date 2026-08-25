@@ -1,5 +1,7 @@
 import FavoriteTeamItem from "../components/profile/FavoriteTeamItem.jsx";
 import TeamFlag from "../components/teams/TeamFlag.jsx";
+import { COMPETITIONS } from "../config/competitions.js";
+import { filterActiveCompetitionFavorites } from "../utils/competitionCapabilities.js";
 import { formatTehranMatchDateTime } from "../utils/dates.js";
 
 function FavoriteGroup({ favorites, isPending, lang, onRemove, t, title }) {
@@ -43,9 +45,10 @@ export default function ProfilePage({
     ? `${telegramUser.first_name || ""} ${telegramUser.last_name || ""}`.trim()
     : t.profileTitle;
   const profileUsername = telegramUser?.username ? `@${telegramUser.username}` : t.noUsername;
-  const clubFavorites = favoriteTeams.filter((team) => team.team_type === "club");
-  const nationalFavorites = favoriteTeams.filter((team) => team.team_type === "national");
-  const otherFavorites = favoriteTeams.filter(
+  const activeFavoriteTeams = filterActiveCompetitionFavorites(favoriteTeams, COMPETITIONS);
+  const clubFavorites = activeFavoriteTeams.filter((team) => team.team_type === "club");
+  const nationalFavorites = activeFavoriteTeams.filter((team) => team.team_type === "national");
+  const otherFavorites = activeFavoriteTeams.filter(
     (team) => team.team_type !== "club" && team.team_type !== "national",
   );
   const isPending = (favorite) => favoritePendingKeys.has(
@@ -101,7 +104,7 @@ export default function ProfilePage({
         <div className="profile-list profile-favorites-v2">
           <div className="profile-list-header">
             <h3>⭐ {t.favoriteTeams}</h3>
-            <span>{favoriteTeams.length}</span>
+            <span>{activeFavoriteTeams.length}</span>
           </div>
 
           {!telegramUser && <p>{t.favoriteIdentityRequired}</p>}
@@ -119,7 +122,7 @@ export default function ProfilePage({
           {showResolutionNotice && (
             <p className="profile-favorite-notice">{t.favoriteResolutionNotice}</p>
           )}
-          {favoriteStatus === "ready" && favoriteTeams.length === 0 && <p>{t.noFavorites}</p>}
+          {favoriteStatus === "ready" && activeFavoriteTeams.length === 0 && <p>{t.noFavorites}</p>}
 
           {clubFavorites.length > 0 && (
             <FavoriteGroup

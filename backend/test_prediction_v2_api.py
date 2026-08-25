@@ -57,8 +57,8 @@ class PredictionV2ApiTests(unittest.TestCase):
             "/prediction",
             json={
                 "telegram_id": 10,
-                "competition_key": "worldcup2026",
-                "season_key": "2026",
+                "competition_key": "premier_league",
+                "season_key": "2026-2027",
                 "match_id": match_id,
                 "prediction_type": "result",
                 "predicted_result": predicted_result,
@@ -71,8 +71,8 @@ class PredictionV2ApiTests(unittest.TestCase):
 
         self.assertEqual(first.status_code, 200)
         item = first.json()["predictions"][0]
-        self.assertEqual(item["competition_key"], "worldcup2026")
-        self.assertEqual(item["season_key"], "2026")
+        self.assertEqual(item["competition_key"], "premier_league")
+        self.assertEqual(item["season_key"], "2026-2027")
         self.assertEqual(item["match_id"], "42")
         self.assertEqual(item["prediction_type"], "result")
         self.assertEqual(item["prediction"], "home")
@@ -100,8 +100,8 @@ class PredictionV2ApiTests(unittest.TestCase):
                     "/prediction",
                     json={
                         "telegram_id": 10,
-                        "competition_key": "worldcup2026",
-                        "season_key": "2026",
+                        "competition_key": "premier_league",
+                        "season_key": "2026-2027",
                         "match_id": str(index),
                         "prediction_type": "exact_score",
                         "home_score": home_score,
@@ -144,20 +144,19 @@ class PredictionV2ApiTests(unittest.TestCase):
                     self.assertEqual(self.client.post("/prediction", json=body).status_code, 400)
         resolver.assert_not_called()
 
-    def test_legacy_numeric_body_maps_only_to_worldcup_scope(self):
+    def test_legacy_numeric_worldcup_body_is_rejected_after_archival(self):
         with patch("main.get_match_for_season", return_value=future_match()) as resolver:
             response = self.client.post(
                 "/prediction",
                 json={"telegram_id": 10, "match_id": 42, "prediction": "draw"},
             )
 
-        self.assertEqual(response.status_code, 200)
-        item = response.json()["predictions"][0]
+        self.assertEqual(response.status_code, 501)
         self.assertEqual(
-            (item["competition_key"], item["season_key"], item["match_id"], item["prediction"]),
-            ("worldcup2026", "2026", "42", "draw"),
+            response.json(),
+            {"detail": "Competition predictions not supported"},
         )
-        resolver.assert_called_once_with("worldcup2026", "2026", "42")
+        resolver.assert_not_called()
 
         rejected = self.client.post(
             "/prediction",

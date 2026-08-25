@@ -67,16 +67,17 @@ class FavoritesV2ApiTests(unittest.TestCase):
                 },
             )
 
-    def test_add_world_cup_and_premier_league_favorites_with_trusted_metadata(self):
+    def test_archived_world_cup_is_rejected_and_active_favorite_is_saved(self):
         world_cup = self.post_favorite("worldcup2026", 6, WORLD_CUP_TEAM)
         premier_league = self.post_favorite(
             "premier_league", "mp_team_1", PREMIER_LEAGUE_TEAM
         )
 
-        self.assertEqual(world_cup.status_code, 200)
-        self.assertEqual(world_cup.json()["favorite"]["team_type"], "national")
-        self.assertEqual(world_cup.json()["favorite"]["team_name_en"], "IR Iran")
-        self.assertNotIn("telegram_id", world_cup.json()["favorite"])
+        self.assertEqual(world_cup.status_code, 501)
+        self.assertEqual(
+            world_cup.json(),
+            {"detail": "Competition favorites not supported"},
+        )
         self.assertEqual(premier_league.status_code, 200)
         self.assertEqual(premier_league.json()["favorite"]["team_type"], "club")
         self.assertEqual(
@@ -92,16 +93,15 @@ class FavoritesV2ApiTests(unittest.TestCase):
         self.assertEqual(
             rows,
             [
-                ("worldcup2026", "6", "text"),
                 ("premier_league", "mp_team_1", "text"),
             ],
         )
 
     def test_same_team_id_across_competitions_and_duplicate_add_are_safe(self):
         shared_pl_team = {**PREMIER_LEAGUE_TEAM, "id": "6"}
-        first = self.post_favorite("worldcup2026", 6, WORLD_CUP_TEAM)
+        first = self.post_favorite("la_liga", 6, WORLD_CUP_TEAM)
         second = self.post_favorite("premier_league", "6", shared_pl_team)
-        duplicate = self.post_favorite("worldcup2026", 6, WORLD_CUP_TEAM)
+        duplicate = self.post_favorite("la_liga", 6, WORLD_CUP_TEAM)
 
         self.assertTrue(first.json()["created"])
         self.assertTrue(second.json()["created"])
@@ -167,7 +167,7 @@ class FavoritesV2ApiTests(unittest.TestCase):
         )
         self.assertEqual(extra_field.status_code, 422)
 
-    def test_legacy_numeric_world_cup_body_is_validated_and_mapped(self):
+    def test_legacy_numeric_world_cup_body_is_rejected_after_archival(self):
         with (
             patch("main.get_team_for_competition", return_value=WORLD_CUP_TEAM) as resolver,
             patch("favorite_service.get_teams_for_competition", return_value=[WORLD_CUP_TEAM]),
@@ -185,12 +185,12 @@ class FavoritesV2ApiTests(unittest.TestCase):
                 },
             )
 
-        self.assertEqual(response.status_code, 200)
-        resolver.assert_called_once_with("worldcup2026", "6")
-        favorite = response.json()["favorite"]
-        self.assertEqual(favorite["competition_key"], "worldcup2026")
-        self.assertEqual(favorite["team_name_en"], "IR Iran")
-        self.assertNotEqual(favorite.get("emoji"), "X")
+        self.assertEqual(response.status_code, 501)
+        self.assertEqual(
+            response.json(),
+            {"detail": "Competition favorites not supported"},
+        )
+        resolver.assert_not_called()
 
     def test_arbitrary_or_string_legacy_identity_is_rejected(self):
         with patch("main.get_team_for_competition", return_value=None):
@@ -202,7 +202,7 @@ class FavoritesV2ApiTests(unittest.TestCase):
                     "team_name": "Invented Team",
                 },
             )
-        self.assertEqual(arbitrary.status_code, 404)
+        self.assertEqual(arbitrary.status_code, 501)
 
         string_id = self.client.post(
             "/favorite-team",

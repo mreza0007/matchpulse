@@ -45,8 +45,10 @@ import {
 } from "./utils/matches.js";
 import { getKickoffTime, groupMatchesByDate } from "./utils/dates.js";
 import { normalizeTeamKey } from "./utils/teams.js";
+import { isArchivedCompetition } from "./utils/competitionCapabilities.js";
 
 const EMPTY_SET = new Set();
+const LEGACY_INLINE_MATCH_ACTIONS_ENABLED = false;
 
 function BrandLogo({ competition, lang }) {
   const [hasError, setHasError] = useState(false);
@@ -671,13 +673,13 @@ function App() {
         (item) => favoriteIdentityKey(item.competition_key, item.team_id) === identityKey,
       );
       if (favorite) removeScopedFavorite(favorite);
-    } else {
+    } else if (!isArchivedCompetition(COMPETITIONS[competitionKey])) {
       addScopedFavorite(competitionKey, team);
     }
   };
 
   const addReminder = (matchId) => {
-    if (!selectedCompetition.supportsReminders) return;
+    if (!LEGACY_INLINE_MATCH_ACTIONS_ENABLED) return;
 
     if (!telegramId) {
       setReminderMessage(t.unavailable);
@@ -700,8 +702,6 @@ function App() {
   };
 
   const removeReminder = (matchId) => {
-    if (!selectedCompetition.supportsReminders) return;
-
     if (!telegramId) {
       setReminderMessage(t.unavailable);
       return;
@@ -731,7 +731,7 @@ function App() {
   };
 
   const saveMatchPrediction = (matchId, prediction) => {
-    if (!selectedCompetition.supportsPredictions) return;
+    if (!LEGACY_INLINE_MATCH_ACTIONS_ENABLED) return;
 
     const matchKey = String(matchId);
 
@@ -922,9 +922,9 @@ function App() {
         predictionSaveFailed={predictionErrorMatchIds.has(matchKey)}
         predictionForceLocked={predictionLockedMatchIds.has(matchKey)}
         {...options}
-        showReminder={selectedCompetition.supportsReminders && (options.showReminder ?? true)}
+        showReminder={LEGACY_INLINE_MATCH_ACTIONS_ENABLED && (options.showReminder ?? true)}
         showFavorites={false}
-        showPredictions={selectedCompetition.supportsPredictions}
+        showPredictions={LEGACY_INLINE_MATCH_ACTIONS_ENABLED}
       />
     );
   };
@@ -1073,7 +1073,7 @@ function App() {
 
       {activeTab === "profile" && (
         <ProfilePage
-          canRemoveReminders={selectedCompetition.supportsReminders}
+          canRemoveReminders
           favoriteMessage={favoriteMessage}
           favoriteMeta={favoriteMeta}
           favoritePendingKeys={favoritePendingKeys}
