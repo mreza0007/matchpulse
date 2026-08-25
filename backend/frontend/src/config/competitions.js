@@ -1,5 +1,30 @@
 import { API_BASE_URL } from "../api/client.js";
 
+function genericCompetitionConfig(competitionKey, seasonKey, labels, logoFallback) {
+  const competition = encodeURIComponent(competitionKey);
+  const season = encodeURIComponent(seasonKey);
+  return {
+    competitionKey,
+    seasonKey,
+    labels,
+    subtitles: {
+      fa: `برنامه بازی‌ها، نتایج و وضعیت زنده ${labels.fa}`,
+      en: `Fixtures, results and live match status for ${labels.en}`,
+    },
+    dataUrls: {
+      matches: `${API_BASE_URL}/competitions/${competition}/seasons/${season}/matches?status=all`,
+      teams: `${API_BASE_URL}/competitions/${competition}/seasons/${season}/teams`,
+      events: (matchId) => (
+        `${API_BASE_URL}/competitions/${competition}/seasons/${season}/matches/${encodeURIComponent(matchId)}/events`
+      ),
+    },
+    logoSrc: "",
+    logoFallback,
+    fixedStats: null,
+    supportsScopedEvents: true,
+  };
+}
+
 export const COMPETITIONS = {
   worldcup2026: {
     competitionKey: "worldcup2026",
@@ -45,4 +70,28 @@ export const COMPETITIONS = {
     supportsPredictions: false,
     supportsScopedEvents: true,
   },
+  persian_gulf_pro_league: genericCompetitionConfig(
+    "persian_gulf_pro_league", "1405-1406",
+    { fa: "لیگ برتر خلیج فارس", en: "Persian Gulf Pro League" }, "PGPL",
+  ),
+  la_liga: genericCompetitionConfig(
+    "la_liga", "2026-2027", { fa: "لالیگا", en: "La Liga" }, "LL",
+  ),
+  serie_a: genericCompetitionConfig(
+    "serie_a", "2026-2027", { fa: "سری آ", en: "Serie A" }, "SA",
+  ),
+  bundesliga: genericCompetitionConfig(
+    "bundesliga", "2026-2027", { fa: "بوندس‌لیگا", en: "Bundesliga" }, "BL",
+  ),
+  ligue_1: genericCompetitionConfig(
+    "ligue_1", "2026-2027", { fa: "لیگ ۱ فرانسه", en: "Ligue 1" }, "L1",
+  ),
+  champions_league: genericCompetitionConfig(
+    "champions_league", "2026-2027",
+    { fa: "لیگ قهرمانان اروپا", en: "UEFA Champions League" }, "UCL",
+  ),
+  europa_league: genericCompetitionConfig(
+    "europa_league", "2026-2027",
+    { fa: "لیگ اروپا", en: "UEFA Europa League" }, "UEL",
+  ),
 };

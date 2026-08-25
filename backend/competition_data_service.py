@@ -77,6 +77,42 @@ COMPETITION_DATA_PROVIDERS = {
     },
 }
 
+def generic_football_provider(competition_key, season_key, supports_standings=True):
+    season_provider = {
+        "matches": partial(
+            get_generic_season_matches,
+            competition_key,
+            season_key,
+            competition_format="league",
+        ),
+        "teams": partial(get_generic_season_teams, competition_key, season_key),
+        "live": get_generic_match_live,
+        "events": get_generic_match_events,
+    }
+    if supports_standings:
+        season_provider["standings"] = partial(
+            get_generic_season_standings,
+            competition_key,
+            season_key,
+        )
+    return {"seasons": {season_key: season_provider}}
+
+
+for _competition_key, _season_key, _supports_standings in (
+    ("persian_gulf_pro_league", "1405-1406", True),
+    ("la_liga", "2026-2027", True),
+    ("serie_a", "2026-2027", True),
+    ("bundesliga", "2026-2027", True),
+    ("ligue_1", "2026-2027", True),
+    ("champions_league", "2026-2027", False),
+    ("europa_league", "2026-2027", False),
+):
+    COMPETITION_DATA_PROVIDERS[_competition_key] = generic_football_provider(
+        _competition_key,
+        _season_key,
+        supports_standings=_supports_standings,
+    )
+
 
 def get_season_provider(competition_key, season_key):
     provider = COMPETITION_DATA_PROVIDERS.get(normalize_competition_key(competition_key))

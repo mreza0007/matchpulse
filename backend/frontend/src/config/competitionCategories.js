@@ -5,5 +5,12 @@ export const COMPETITION_CATEGORY_ORDER = ["leagues", "clubCompetitions", "natio
 
 export const COMPETITION_CATEGORY_BY_KEY = {
   premier_league: "leagues",
+  persian_gulf_pro_league: "leagues",
+  la_liga: "leagues",
+  serie_a: "leagues",
+  bundesliga: "leagues",
+  ligue_1: "leagues",
+  champions_league: "clubCompetitions",
+  europa_league: "clubCompetitions",
   worldcup2026: "nationalCompetitions",
 };

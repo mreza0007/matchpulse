@@ -108,10 +108,17 @@ export default function CompetitionPage({
   t,
   telegramId,
 }) {
-  const isLeague = competition.format === "league";
+  const isLeague = (
+    competition.format === "league"
+    && competition.supports_standings === true
+  );
   const isGroupKnockout = competition.format === "group_knockout";
   const hasKnockoutTab = isGroupKnockout || competition.format === "knockout_only";
-  const tabs = FORMAT_TABS[competition.format] || [];
+  const tabs = (FORMAT_TABS[competition.format] || []).filter((tab) => (
+    (tab !== "standings" || competition.supports_standings === true)
+    && (tab !== "groups" || competition.supports_groups === true)
+    && (tab !== "knockout" || competition.supports_knockout === true)
+  ));
   const [activeTab, setActiveTab] = useState("overview");
   const [matches, setMatches] = useState(INITIAL_MATCHES);
   const [teams, setTeams] = useState(INITIAL_TEAMS);

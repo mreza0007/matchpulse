@@ -41,6 +41,121 @@ COMPETITIONS = [
     },
 ]
 
+COMPETITIONS.extend([
+    {
+        "competition_key": "persian_gulf_pro_league",
+        "season_key": "1405-1406",
+        "name_fa": "لیگ برتر خلیج فارس",
+        "name_en": "Persian Gulf Pro League",
+        "type": "club",
+        "format": "league",
+        "status": "active",
+        "is_active": True,
+        "supports_matches": True,
+        "supports_groups": False,
+        "supports_knockout": False,
+        "supports_standings": True,
+        "supports_predictions": True,
+        "supports_archive": False,
+    },
+    {
+        "competition_key": "la_liga",
+        "season_key": "2026-2027",
+        "name_fa": "لالیگا",
+        "name_en": "La Liga",
+        "type": "club",
+        "format": "league",
+        "status": "active",
+        "is_active": True,
+        "supports_matches": True,
+        "supports_groups": False,
+        "supports_knockout": False,
+        "supports_standings": True,
+        "supports_predictions": True,
+        "supports_archive": False,
+    },
+    {
+        "competition_key": "serie_a",
+        "season_key": "2026-2027",
+        "name_fa": "سری آ",
+        "name_en": "Serie A",
+        "type": "club",
+        "format": "league",
+        "status": "active",
+        "is_active": True,
+        "supports_matches": True,
+        "supports_groups": False,
+        "supports_knockout": False,
+        "supports_standings": True,
+        "supports_predictions": True,
+        "supports_archive": False,
+    },
+    {
+        "competition_key": "bundesliga",
+        "season_key": "2026-2027",
+        "name_fa": "بوندس‌لیگا",
+        "name_en": "Bundesliga",
+        "type": "club",
+        "format": "league",
+        "status": "active",
+        "is_active": True,
+        "supports_matches": True,
+        "supports_groups": False,
+        "supports_knockout": False,
+        "supports_standings": True,
+        "supports_predictions": True,
+        "supports_archive": False,
+    },
+    {
+        "competition_key": "ligue_1",
+        "season_key": "2026-2027",
+        "name_fa": "لیگ ۱ فرانسه",
+        "name_en": "Ligue 1",
+        "type": "club",
+        "format": "league",
+        "status": "active",
+        "is_active": True,
+        "supports_matches": True,
+        "supports_groups": False,
+        "supports_knockout": False,
+        "supports_standings": True,
+        "supports_predictions": True,
+        "supports_archive": False,
+    },
+    {
+        "competition_key": "champions_league",
+        "season_key": "2026-2027",
+        "name_fa": "لیگ قهرمانان اروپا",
+        "name_en": "UEFA Champions League",
+        "type": "club",
+        "format": "league",
+        "status": "active",
+        "is_active": True,
+        "supports_matches": True,
+        "supports_groups": False,
+        "supports_knockout": False,
+        "supports_standings": False,
+        "supports_predictions": True,
+        "supports_archive": False,
+    },
+    {
+        "competition_key": "europa_league",
+        "season_key": "2026-2027",
+        "name_fa": "لیگ اروپا",
+        "name_en": "UEFA Europa League",
+        "type": "club",
+        "format": "league",
+        "status": "active",
+        "is_active": True,
+        "supports_matches": True,
+        "supports_groups": False,
+        "supports_knockout": False,
+        "supports_standings": False,
+        "supports_predictions": True,
+        "supports_archive": False,
+    },
+])
+
 
 def validated_competition(competition):
     competition_format = competition.get("format")
@@ -50,7 +165,11 @@ def validated_competition(competition):
             f"Invalid competition format for {competition_key!r}: {competition_format!r}"
         )
 
-    return competition.copy()
+    validated = competition.copy()
+    validated.setdefault("supports_favorites", validated.get("is_active") is True)
+    validated.setdefault("supports_reminders", False)
+    validated.setdefault("supports_prediction_history", validated.get("supports_predictions") is True)
+    return validated
 
 
 def get_competitions():
