@@ -13,7 +13,10 @@ import KnockoutRound from "../components/competitions/KnockoutRound.jsx";
 import StandingsTable from "../components/competitions/StandingsTable.jsx";
 import MatchCard from "../components/matches/MatchCard.jsx";
 import TeamFlag from "../components/teams/TeamFlag.jsx";
-import { competitionExperience } from "../utils/competitionCapabilities.js";
+import {
+  competitionExperience,
+  supportsNewCompetitionAction,
+} from "../utils/competitionCapabilities.js";
 import { getKickoffTime, groupMatchesByDate } from "../utils/dates.js";
 import {
   isFutureMatchStatus,
@@ -110,6 +113,9 @@ function ActiveCompetitionPage({
   t,
   telegramId,
 }) {
+  const canAddFavorites = supportsNewCompetitionAction(
+    competition, "supports_favorites",
+  );
   const isLeague = (
     competition.format === "league"
     && competition.supports_standings === true
@@ -499,6 +505,7 @@ function ActiveCompetitionPage({
             : "";
           const isFavorite = hasCanonicalIdentity && favoriteIdentityKeys.has(identityKey);
           const isPending = hasCanonicalIdentity && favoritePendingKeys.has(identityKey);
+          const showFavoriteAction = hasCanonicalIdentity && (isFavorite || canAddFavorites);
 
           return (
             <div className="competition-team-row" key={team.id || team.team_key || index}>
@@ -508,13 +515,13 @@ function ActiveCompetitionPage({
                 teamName={team.name_en || team.team_name || ""}
               />
               <strong>{teamName(team, lang)}</strong>
-              {hasCanonicalIdentity && (
+              {showFavoriteAction && (
                 <button
                   aria-label={isFavorite ? t.removeFavorite : t.addFavorite}
                   aria-pressed={isFavorite}
                   className={`competition-team-favorite ${isFavorite ? "active" : ""}`}
                   disabled={!telegramId || isPending}
-                  onClick={() => onFavoriteToggle(competition.competition_key, team)}
+                  onClick={() => onFavoriteToggle(competition, team)}
                   type="button"
                 >
                   <span aria-hidden="true">{isFavorite ? "★" : "☆"}</span>

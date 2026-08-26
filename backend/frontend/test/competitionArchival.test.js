@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   competitionExperience,
   filterActiveCompetitionFavorites,
+  groupActiveCompetitionFavorites,
   supportsNewCompetitionAction,
 } from "../src/utils/competitionCapabilities.js";
 
@@ -60,19 +61,76 @@ test("archive page renders WorldCupArchive from the summary API only", () => {
 
 test("archived favorites are filtered from Profile without mutating stored records", () => {
   const storedFavorites = [
-    { competition_key: "worldcup2026", team_id: "6", team_type: "national" },
-    { competition_key: "premier_league", team_id: "arsenal", team_type: "club" },
+    {
+      competition_key: "worldcup2026",
+      team_id: "6",
+      competition: {
+        competition_key: "worldcup2026",
+        is_active: false,
+        status: "archived",
+      },
+    },
+    {
+      competition_key: "premier_league",
+      team_id: "arsenal",
+      competition: {
+        competition_key: "premier_league",
+        is_active: true,
+        status: "active",
+      },
+    },
   ];
 
-  const competitionByKey = {
-    worldcup2026: { status: "archived" },
-    premier_league: { status: "active" },
-  };
-  const activeFavorites = filterActiveCompetitionFavorites(storedFavorites, competitionByKey);
+  const activeFavorites = filterActiveCompetitionFavorites(storedFavorites);
 
   assert.deepEqual(activeFavorites, [storedFavorites[1]]);
   assert.equal(storedFavorites.length, 2);
   assert.equal(storedFavorites[0].competition_key, "worldcup2026");
+});
+
+test("active favorites group deterministically by authoritative competition metadata", () => {
+  const favorite = (competitionKey, competitionName, teamId, teamName) => ({
+    competition_key: competitionKey,
+    competition: {
+      competition_key: competitionKey,
+      is_active: true,
+      name_en: competitionName,
+      status: "active",
+      supports_favorites: true,
+    },
+    team_id: teamId,
+    team_name_en: teamName,
+  });
+  const groups = groupActiveCompetitionFavorites([
+    favorite("premier_league", "Premier League", "6", "Shared Club"),
+    favorite("la_liga", "La Liga", "6", "Shared Club"),
+    favorite("premier_league", "Premier League", "7", "Another Club"),
+  ], "en");
+
+  assert.deepEqual(groups.map((group) => group.competitionKey), ["la_liga", "premier_league"]);
+  assert.deepEqual(groups[1].favorites.map((item) => item.team_id), ["7", "6"]);
+  assert.notEqual(groups[0].favorites[0].competition_key, groups[1].favorites[1].competition_key);
+});
+
+test("favorite UI actions consume authoritative competition capability metadata", () => {
+  const app = source("../src/App.jsx");
+  const competitionPage = source("../src/pages/CompetitionPage.jsx");
+  const profilePage = source("../src/pages/ProfilePage.jsx");
+
+  assert.match(
+    competitionPage,
+    /supportsNewCompetitionAction\(\s*competition, "supports_favorites",?\s*\)/,
+  );
+  assert.match(competitionPage, /onFavoriteToggle\(competition, team\)/);
+  assert.doesNotMatch(competitionPage, /onFavoriteToggle\(competition\.competition_key/);
+  assert.match(
+    app,
+    /supportsNewCompetitionAction\(competition, "supports_favorites"\)/,
+  );
+  assert.doesNotMatch(app, /isArchivedCompetition\(COMPETITIONS\[competitionKey\]\)/);
+  assert.match(profilePage, /groupActiveCompetitionFavorites\(favoriteTeams, lang\)/);
+  assert.doesNotMatch(profilePage, /config\/competitions/);
+  assert.doesNotMatch(profilePage, /team_type === "club"|team_type === "national"/);
 });
 
 test("active competition routing and capabilities remain unchanged", () => {

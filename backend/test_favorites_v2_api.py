@@ -81,6 +81,18 @@ class FavoritesV2ApiTests(unittest.TestCase):
         self.assertEqual(premier_league.status_code, 200)
         self.assertEqual(premier_league.json()["favorite"]["team_type"], "club")
         self.assertEqual(
+            premier_league.json()["favorite"]["competition"],
+            {
+                "competition_key": "premier_league",
+                "name_en": "Premier League",
+                "name_fa": "لیگ برتر انگلیس",
+                "type": "club",
+                "status": "active",
+                "is_active": True,
+                "supports_favorites": True,
+            },
+        )
+        self.assertEqual(
             premier_league.json()["favorite"]["team_logo"],
             "https://example.invalid/club.png",
         )
@@ -108,7 +120,15 @@ class FavoritesV2ApiTests(unittest.TestCase):
         self.assertFalse(duplicate.json()["created"])
         conn = sqlite3.connect(self.db_path)
         self.addCleanup(conn.close)
-        self.assertEqual(conn.execute("SELECT COUNT(*) FROM favorite_teams").fetchone()[0], 2)
+        self.assertEqual(
+            conn.execute(
+                "SELECT competition_key, team_id FROM favorite_teams ORDER BY competition_key"
+            ).fetchall(),
+            [
+                ("la_liga", "6"),
+                ("premier_league", "6"),
+            ],
+        )
 
     def test_unknown_competition_team_and_provider_failure_are_sanitized(self):
         unknown_competition = self.client.post(
@@ -239,6 +259,24 @@ class FavoritesV2ApiTests(unittest.TestCase):
         self.assertEqual(provider.call_count, 2)
         self.assertEqual(payload["resolution_errors"], 0)
         self.assertEqual(payload["unresolved_count"], 0)
+        self.assertEqual(
+            payload["favorite_teams"][0]["competition"],
+            {
+                "competition_key": "worldcup2026",
+                "name_en": "World Cup 2026",
+                "name_fa": "جام جهانی ۲۰۲۶",
+                "type": "international",
+                "status": "archived",
+                "is_active": False,
+                "supports_favorites": False,
+            },
+        )
+        conn = sqlite3.connect(self.db_path)
+        self.addCleanup(conn.close)
+        self.assertEqual(
+            conn.execute("SELECT COUNT(*) FROM favorite_teams").fetchone()[0],
+            3,
+        )
 
     def test_get_preserves_unresolved_and_partial_provider_failure(self):
         db_service.save_favorite_team_v2_to_db(100, "worldcup2026", "missing")

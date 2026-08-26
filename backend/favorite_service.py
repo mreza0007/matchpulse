@@ -21,6 +21,18 @@ def favorite_team_type(competition):
     return team_type
 
 
+def favorite_competition_metadata(competition):
+    return {
+        "competition_key": competition["competition_key"],
+        "name_en": competition.get("name_en"),
+        "name_fa": competition.get("name_fa"),
+        "type": competition.get("type"),
+        "status": competition.get("status"),
+        "is_active": competition.get("is_active") is True,
+        "supports_favorites": competition.get("supports_favorites") is True,
+    }
+
+
 def favorite_response_item(identity, competition=None, team=None):
     team_id = str(identity["team_id"])
     item = {
@@ -31,6 +43,7 @@ def favorite_response_item(identity, competition=None, team=None):
     }
 
     if competition is not None:
+        item["competition"] = favorite_competition_metadata(competition)
         try:
             item["team_type"] = favorite_team_type(competition)
         except FavoriteTeamTypeError:

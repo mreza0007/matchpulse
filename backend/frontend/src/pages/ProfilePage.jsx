@@ -1,7 +1,6 @@
 import FavoriteTeamItem from "../components/profile/FavoriteTeamItem.jsx";
 import TeamFlag from "../components/teams/TeamFlag.jsx";
-import { COMPETITIONS } from "../config/competitions.js";
-import { filterActiveCompetitionFavorites } from "../utils/competitionCapabilities.js";
+import { groupActiveCompetitionFavorites } from "../utils/competitionCapabilities.js";
 import { formatTehranMatchDateTime } from "../utils/dates.js";
 
 function FavoriteGroup({ favorites, isPending, lang, onRemove, t, title }) {
@@ -45,16 +44,19 @@ export default function ProfilePage({
     ? `${telegramUser.first_name || ""} ${telegramUser.last_name || ""}`.trim()
     : t.profileTitle;
   const profileUsername = telegramUser?.username ? `@${telegramUser.username}` : t.noUsername;
-  const activeFavoriteTeams = filterActiveCompetitionFavorites(favoriteTeams, COMPETITIONS);
-  const clubFavorites = activeFavoriteTeams.filter((team) => team.team_type === "club");
-  const nationalFavorites = activeFavoriteTeams.filter((team) => team.team_type === "national");
-  const otherFavorites = activeFavoriteTeams.filter(
-    (team) => team.team_type !== "club" && team.team_type !== "national",
+  const favoriteGroups = groupActiveCompetitionFavorites(favoriteTeams, lang);
+  const activeFavoriteCount = favoriteGroups.reduce(
+    (count, group) => count + group.favorites.length, 0,
   );
   const isPending = (favorite) => favoritePendingKeys.has(
     `${favorite.competition_key}:${String(favorite.team_id)}`,
   );
-  const showResolutionNotice = favoriteMeta.resolutionErrors > 0 || favoriteMeta.unresolvedCount > 0;
+  const hasActiveUnresolvedFavorite = favoriteGroups.some((group) => (
+    group.favorites.some((favorite) => favorite.resolved === false)
+  ));
+  const showResolutionNotice = hasActiveUnresolvedFavorite && (
+    favoriteMeta.resolutionErrors > 0 || favoriteMeta.unresolvedCount > 0
+  );
 
   return (
     <section className="section profile-section">
@@ -104,7 +106,7 @@ export default function ProfilePage({
         <div className="profile-list profile-favorites-v2">
           <div className="profile-list-header">
             <h3>⭐ {t.favoriteTeams}</h3>
-            <span>{activeFavoriteTeams.length}</span>
+            <span>{activeFavoriteCount}</span>
           </div>
 
           {!telegramUser && <p>{t.favoriteIdentityRequired}</p>}
@@ -122,38 +124,19 @@ export default function ProfilePage({
           {showResolutionNotice && (
             <p className="profile-favorite-notice">{t.favoriteResolutionNotice}</p>
           )}
-          {favoriteStatus === "ready" && activeFavoriteTeams.length === 0 && <p>{t.noFavorites}</p>}
+          {favoriteStatus === "ready" && activeFavoriteCount === 0 && <p>{t.noFavorites}</p>}
 
-          {clubFavorites.length > 0 && (
+          {favoriteGroups.map((group) => (
             <FavoriteGroup
-              favorites={clubFavorites}
+              favorites={group.favorites}
               isPending={isPending}
+              key={group.competitionKey}
               lang={lang}
               onRemove={onRemoveFavorite}
               t={t}
-              title={t.favoriteClubTeams}
+              title={group.title}
             />
-          )}
-          {nationalFavorites.length > 0 && (
-            <FavoriteGroup
-              favorites={nationalFavorites}
-              isPending={isPending}
-              lang={lang}
-              onRemove={onRemoveFavorite}
-              t={t}
-              title={t.favoriteNationalTeams}
-            />
-          )}
-          {otherFavorites.length > 0 && (
-            <FavoriteGroup
-              favorites={otherFavorites}
-              isPending={isPending}
-              lang={lang}
-              onRemove={onRemoveFavorite}
-              t={t}
-              title={t.favoriteOtherTeams}
-            />
-          )}
+          ))}
         </div>
 
         <div className="profile-list">

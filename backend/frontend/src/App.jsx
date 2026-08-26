@@ -45,7 +45,7 @@ import {
 } from "./utils/matches.js";
 import { getKickoffTime, groupMatchesByDate } from "./utils/dates.js";
 import { normalizeTeamKey } from "./utils/teams.js";
-import { isArchivedCompetition } from "./utils/competitionCapabilities.js";
+import { supportsNewCompetitionAction } from "./utils/competitionCapabilities.js";
 
 const EMPTY_SET = new Set();
 const LEGACY_INLINE_MATCH_ACTIONS_ENABLED = false;
@@ -666,14 +666,16 @@ function App() {
       });
   };
 
-  const toggleScopedFavorite = (competitionKey, team) => {
+  const toggleScopedFavorite = (competition, team) => {
+    const competitionKey = competition?.competition_key;
+    if (!competitionKey || team?.id === undefined || team?.id === null) return;
     const identityKey = favoriteIdentityKey(competitionKey, team.id);
     if (favoriteIdentityKeys.has(identityKey)) {
       const favorite = favoriteTeams.find(
         (item) => favoriteIdentityKey(item.competition_key, item.team_id) === identityKey,
       );
       if (favorite) removeScopedFavorite(favorite);
-    } else if (!isArchivedCompetition(COMPETITIONS[competitionKey])) {
+    } else if (supportsNewCompetitionAction(competition, "supports_favorites")) {
       addScopedFavorite(competitionKey, team);
     }
   };
