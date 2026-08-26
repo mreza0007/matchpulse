@@ -92,7 +92,7 @@ class FavoriteTeamsV2SchemaTests(FavoriteTeamsV2TestBase):
         self.assertEqual(prediction_schema_state(conn), "v2")
         self.assertEqual(
             {row[1] for row in conn.execute("PRAGMA table_info(reminders)")},
-            {"id", "telegram_id", "match_id", "match_data", "notified"},
+            {"id", "telegram_id", "competition_key", "season_key", "match_id", "match_data", "notified"},
         )
 
     def test_text_identity_is_scoped_by_competition(self):

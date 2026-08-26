@@ -5,6 +5,11 @@ from pathlib import Path
 from favorite_schema import ensure_favorite_teams_v2_schema, favorite_teams_schema_state
 from prediction_schema import ensure_prediction_v2_schema
 from prediction_evaluation_service import canonical_prediction_result, calculate_prediction_stats
+from reminder_schema import (
+    ensure_reminders_v2_schema,
+    reminders_schema_state,
+    reminders_v2_migration_recorded,
+)
 
 DB_PATH = Path(__file__).parent / "matchpulse.db"
 
@@ -33,20 +38,9 @@ def init_db():
         """
     )
 
+    reminders_migration_recorded = reminders_v2_migration_recorded(conn)
     favorite_teams_schema = ensure_favorite_teams_v2_schema(conn)
-
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS reminders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            telegram_id INTEGER,
-            match_id INTEGER,
-            match_data TEXT,
-            notified INTEGER DEFAULT 0,
-            UNIQUE(telegram_id, match_id)
-        )
-        """
-    )
+    reminders_schema = ensure_reminders_v2_schema(conn)
 
     cursor.execute(
         """
@@ -91,6 +85,12 @@ def init_db():
         print("Legacy favorites schema detected; run the explicit favorite_teams_v2 migration.")
     elif favorite_teams_schema == "unknown":
         print("Unknown favorites schema detected; it was left untouched.")
+    if reminders_schema == "legacy":
+        print("Legacy reminders schema detected; run the explicit reminders_v2 migration.")
+    elif reminders_schema == "unknown":
+        print("Unknown reminders schema detected; it was left untouched.")
+    elif reminders_schema == "v2" and not reminders_migration_recorded:
+        print("Reminders V2 schema has no migration marker; it was left untouched.")
 
 
 def normalize_team_key(value):
@@ -522,122 +522,242 @@ def delete_favorite_team_from_db(telegram_id, team_id, team_key=None):
     return deleted_count > 0
 
 
-def save_reminder_to_db(telegram_id, match):
-    conn = get_connection()
-    cursor = conn.cursor()
+LEGACY_REMINDER_COMPETITION_KEY = "worldcup2026"
+LEGACY_REMINDER_SEASON_KEY = "2026"
 
-    cursor.execute(
-        """
-        INSERT OR IGNORE INTO reminders (
-            telegram_id,
-            match_id,
-            match_data,
-            notified
-        )
-        VALUES (?, ?, ?, 0)
-        """,
-        (
-            telegram_id,
-            match["id"],
-            json.dumps(match, ensure_ascii=False),
-        ),
+
+def _canonical_reminder_identity(match_id, competition_key=None, season_key=None):
+    if competition_key is None and season_key is None:
+        competition_key = LEGACY_REMINDER_COMPETITION_KEY
+        season_key = LEGACY_REMINDER_SEASON_KEY
+    elif competition_key is None or season_key is None:
+        raise ValueError("Reminder competition_key and season_key must be provided together")
+
+    canonical_match_id = str(match_id).strip() if match_id is not None else ""
+    if not canonical_match_id:
+        raise ValueError("Reminder match_id is required")
+    return str(competition_key), str(season_key), canonical_match_id
+
+
+def _require_legacy_worldcup_identity(competition_key, season_key, match_id):
+    if (
+        competition_key != LEGACY_REMINDER_COMPETITION_KEY
+        or season_key != LEGACY_REMINDER_SEASON_KEY
+    ):
+        raise RuntimeError("Scoped reminders require the explicit reminders_v2 migration")
+    try:
+        return int(match_id)
+    except (TypeError, ValueError) as error:
+        raise ValueError("Legacy World Cup reminder match_id must be an integer") from error
+
+
+def _decode_reminder_row(row):
+    competition_key, season_key, match_id, match_data, notified = row
+    match = json.loads(match_data)
+    match.setdefault("competition_key", competition_key)
+    match.setdefault("season_key", season_key)
+    match.setdefault("id", match_id)
+    match["notified"] = bool(notified)
+    return match
+
+
+def save_reminder_to_db(
+    telegram_id, match, competition_key=None, season_key=None
+):
+    match_competition = competition_key
+    match_season = season_key
+    if match_competition is None and match_season is None:
+        match_competition = match.get("competition_key")
+        match_season = match.get("season_key")
+    competition_key, season_key, match_id = _canonical_reminder_identity(
+        match.get("id"), match_competition, match_season
     )
+    match_data = json.dumps(match, ensure_ascii=False)
 
-    conn.commit()
-    conn.close()
-
-
-def get_reminders_from_db(telegram_id):
     conn = get_connection()
-    cursor = conn.cursor()
+    try:
+        state = reminders_schema_state(conn)
+        if state == "v2":
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO reminders (
+                    telegram_id, competition_key, season_key,
+                    match_id, match_data, notified
+                )
+                VALUES (?, ?, ?, ?, ?, 0)
+                """,
+                (telegram_id, competition_key, season_key, match_id, match_data),
+            )
+        elif state == "legacy":
+            legacy_match_id = _require_legacy_worldcup_identity(
+                competition_key, season_key, match_id
+            )
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO reminders (
+                    telegram_id, match_id, match_data, notified
+                )
+                VALUES (?, ?, ?, 0)
+                """,
+                (telegram_id, legacy_match_id, match_data),
+            )
+        else:
+            raise RuntimeError("Unsupported reminders schema")
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
 
-    cursor.execute(
-        """
-        SELECT match_data, notified
-        FROM reminders
-        WHERE telegram_id = ?
-        """,
-        (telegram_id,),
-    )
 
-    rows = cursor.fetchall()
-    conn.close()
+def get_reminders_from_db(telegram_id, competition_key=None, season_key=None):
+    if (competition_key is None) != (season_key is None):
+        raise ValueError("Reminder competition_key and season_key must be provided together")
 
-    reminders = []
-
-    for row in rows:
-        match = json.loads(row[0])
-        match["notified"] = bool(row[1])
-        reminders.append(match)
-
-    return reminders
-
-
-def delete_reminder_from_db(telegram_id, match_id):
     conn = get_connection()
-    cursor = conn.cursor()
+    try:
+        state = reminders_schema_state(conn)
+        if state == "v2":
+            query = """
+                SELECT competition_key, season_key, match_id, match_data, notified
+                FROM reminders
+                WHERE telegram_id = ?
+            """
+            params = [telegram_id]
+            if competition_key is not None:
+                query += " AND competition_key = ? AND season_key = ?"
+                params.extend((str(competition_key), str(season_key)))
+            query += " ORDER BY id"
+            rows = conn.execute(query, params).fetchall()
+        elif state == "legacy":
+            if competition_key is not None:
+                _require_legacy_worldcup_identity(
+                    str(competition_key), str(season_key), "0"
+                )
+            rows = conn.execute(
+                """
+                SELECT 'worldcup2026', '2026', CAST(match_id AS TEXT),
+                       match_data, notified
+                FROM reminders
+                WHERE telegram_id = ?
+                ORDER BY id
+                """,
+                (telegram_id,),
+            ).fetchall()
+        else:
+            raise RuntimeError("Unsupported reminders schema")
+    finally:
+        conn.close()
 
-    cursor.execute(
-        """
-        DELETE FROM reminders
-        WHERE telegram_id = ? AND match_id = ?
-        """,
-        (telegram_id, match_id),
+    return [_decode_reminder_row(row) for row in rows]
+
+
+def delete_reminder_from_db(
+    telegram_id, match_id, competition_key=None, season_key=None
+):
+    competition_key, season_key, match_id = _canonical_reminder_identity(
+        match_id, competition_key, season_key
     )
-
-    deleted_count = cursor.rowcount
-
-    conn.commit()
-    conn.close()
-
-    return deleted_count > 0
+    conn = get_connection()
+    try:
+        state = reminders_schema_state(conn)
+        if state == "v2":
+            cursor = conn.execute(
+                """
+                DELETE FROM reminders
+                WHERE telegram_id = ?
+                  AND competition_key = ?
+                  AND season_key = ?
+                  AND match_id = ?
+                """,
+                (telegram_id, competition_key, season_key, match_id),
+            )
+        elif state == "legacy":
+            legacy_match_id = _require_legacy_worldcup_identity(
+                competition_key, season_key, match_id
+            )
+            cursor = conn.execute(
+                "DELETE FROM reminders WHERE telegram_id = ? AND match_id = ?",
+                (telegram_id, legacy_match_id),
+            )
+        else:
+            raise RuntimeError("Unsupported reminders schema")
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
 
 
 def get_all_reminders_from_db():
     conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """
-        SELECT telegram_id, match_data, notified
-        FROM reminders
-        """
-    )
-
-    rows = cursor.fetchall()
-    conn.close()
+    try:
+        state = reminders_schema_state(conn)
+        if state == "v2":
+            rows = conn.execute(
+                """
+                SELECT telegram_id, competition_key, season_key,
+                       match_id, match_data, notified
+                FROM reminders
+                ORDER BY id
+                """
+            ).fetchall()
+        elif state == "legacy":
+            rows = conn.execute(
+                """
+                SELECT telegram_id, 'worldcup2026', '2026',
+                       CAST(match_id AS TEXT), match_data, notified
+                FROM reminders
+                ORDER BY id
+                """
+            ).fetchall()
+        else:
+            raise RuntimeError("Unsupported reminders schema")
+    finally:
+        conn.close()
 
     result = {}
-
     for row in rows:
-        telegram_id = row[0]
-        match = json.loads(row[1])
-        match["notified"] = bool(row[2])
-
-        if telegram_id not in result:
-            result[telegram_id] = []
-
-        result[telegram_id].append(match)
-
+        result.setdefault(row[0], []).append(_decode_reminder_row(row[1:]))
     return result
 
 
-def mark_reminder_notified(telegram_id, match_id):
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """
-        UPDATE reminders
-        SET notified = 1
-        WHERE telegram_id = ? AND match_id = ?
-        """,
-        (telegram_id, match_id),
+def mark_reminder_notified(
+    telegram_id, match_id, competition_key=None, season_key=None
+):
+    competition_key, season_key, match_id = _canonical_reminder_identity(
+        match_id, competition_key, season_key
     )
-
-    conn.commit()
-    conn.close()
- 
+    conn = get_connection()
+    try:
+        state = reminders_schema_state(conn)
+        if state == "v2":
+            cursor = conn.execute(
+                """
+                UPDATE reminders
+                SET notified = 1
+                WHERE telegram_id = ?
+                  AND competition_key = ?
+                  AND season_key = ?
+                  AND match_id = ?
+                """,
+                (telegram_id, competition_key, season_key, match_id),
+            )
+        elif state == "legacy":
+            legacy_match_id = _require_legacy_worldcup_identity(
+                competition_key, season_key, match_id
+            )
+            cursor = conn.execute(
+                """
+                UPDATE reminders SET notified = 1
+                WHERE telegram_id = ? AND match_id = ?
+                """,
+                (telegram_id, legacy_match_id),
+            )
+        else:
+            raise RuntimeError("Unsupported reminders schema")
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
 
 def get_all_favorite_teams_from_db():
     conn = get_connection()
