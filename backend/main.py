@@ -1,6 +1,7 @@
 import os
 import asyncio
 import sqlite3
+import time
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -37,7 +38,8 @@ from favorite_service import (
     favorite_team_type,
     resolve_favorite_identities,
 )
-from prediction_service import prediction_is_locked, prediction_is_predictable
+from prediction_service import prediction_is_locked
+from prediction_scope_service import select_prediction_scope_matches
 from prediction_evaluation_service import (
     calculate_prediction_stats,
     evaluate_predictions,
@@ -261,6 +263,7 @@ def get_competition_season_teams(competition_key: str, season_key: str):
 @api.get("/competitions/{competition_key}/seasons/{season_key}/predictable-matches")
 def get_competition_season_predictable_matches(competition_key: str, season_key: str):
     competition_key, season_key = validate_prediction_scope(competition_key, season_key)
+    competition = get_competition(competition_key)
     try:
         matches = get_prediction_matches_for_season(competition_key, season_key)
     except CompetitionDataProviderError as error:
@@ -268,7 +271,7 @@ def get_competition_season_predictable_matches(competition_key: str, season_key:
             status_code=502, detail="Prediction match provider unavailable"
         ) from error
 
-    predictable_matches = [match for match in matches if prediction_is_predictable(match)]
+    predictable_matches = select_prediction_scope_matches(competition, matches)
     return {
         "competition_key": competition_key,
         "season_key": season_key,
@@ -904,14 +907,28 @@ def create_or_update_prediction(data: PredictionData):
     competition_key, season_key = validate_prediction_scope(
         request["competition_key"], request["season_key"]
     )
+    competition = get_competition(competition_key)
     try:
-        match = get_match_for_season(competition_key, season_key, request["match_id"])
+        matches = get_prediction_matches_for_season(competition_key, season_key)
     except CompetitionDataProviderError as error:
         raise HTTPException(status_code=502, detail="Prediction match provider unavailable") from error
+    requested_match_id = str(request["match_id"])
+    match = next(
+        (
+            candidate
+            for candidate in matches
+            if isinstance(candidate, dict) and str(candidate.get("id")) == requested_match_id
+        ),
+        None,
+    )
     if match is None:
         raise HTTPException(status_code=404, detail="Match not found")
-    if prediction_is_locked(match):
+    now_timestamp = time.time()
+    if prediction_is_locked(match, now_timestamp):
         raise HTTPException(status_code=409, detail="Prediction is locked")
+    predictable_matches = select_prediction_scope_matches(competition, matches, now_timestamp)
+    if not any(str(candidate.get("id")) == requested_match_id for candidate in predictable_matches):
+        raise HTTPException(status_code=409, detail="Match is outside the current prediction scope")
 
     try:
         save_prediction_v2(

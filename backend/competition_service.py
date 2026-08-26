@@ -3,6 +3,10 @@ VALID_COMPETITION_FORMATS = frozenset({
     "group_knockout",
     "knockout_only",
 })
+VALID_PREDICTION_SCOPES = frozenset({
+    "league_next_round",
+    "knockout_next_stage",
+})
 
 
 COMPETITIONS = [
@@ -40,6 +44,7 @@ COMPETITIONS = [
         "supports_knockout": False,
         "supports_standings": True,
         "supports_predictions": True,
+        "prediction_scope": "league_next_round",
         "supports_archive": False,
     },
 ]
@@ -59,6 +64,7 @@ COMPETITIONS.extend([
         "supports_knockout": False,
         "supports_standings": True,
         "supports_predictions": True,
+        "prediction_scope": "league_next_round",
         "supports_archive": False,
     },
     {
@@ -75,6 +81,7 @@ COMPETITIONS.extend([
         "supports_knockout": False,
         "supports_standings": True,
         "supports_predictions": True,
+        "prediction_scope": "league_next_round",
         "supports_archive": False,
     },
     {
@@ -91,6 +98,7 @@ COMPETITIONS.extend([
         "supports_knockout": False,
         "supports_standings": True,
         "supports_predictions": True,
+        "prediction_scope": "league_next_round",
         "supports_archive": False,
     },
     {
@@ -107,6 +115,7 @@ COMPETITIONS.extend([
         "supports_knockout": False,
         "supports_standings": True,
         "supports_predictions": True,
+        "prediction_scope": "league_next_round",
         "supports_archive": False,
     },
     {
@@ -123,6 +132,7 @@ COMPETITIONS.extend([
         "supports_knockout": False,
         "supports_standings": True,
         "supports_predictions": True,
+        "prediction_scope": "league_next_round",
         "supports_archive": False,
     },
     {
@@ -139,6 +149,7 @@ COMPETITIONS.extend([
         "supports_knockout": False,
         "supports_standings": False,
         "supports_predictions": True,
+        "prediction_scope": "knockout_next_stage",
         "supports_archive": False,
     },
     {
@@ -155,6 +166,7 @@ COMPETITIONS.extend([
         "supports_knockout": False,
         "supports_standings": False,
         "supports_predictions": True,
+        "prediction_scope": "knockout_next_stage",
         "supports_archive": False,
     },
 ])
@@ -167,6 +179,13 @@ def validated_competition(competition):
         raise ValueError(
             f"Invalid competition format for {competition_key!r}: {competition_format!r}"
         )
+    prediction_scope = competition.get("prediction_scope")
+    if competition.get("supports_predictions") is True and prediction_scope not in VALID_PREDICTION_SCOPES:
+        competition_key = competition.get("competition_key", "<missing>")
+        raise ValueError(
+            f"Invalid prediction scope for {competition_key!r}: {prediction_scope!r}"
+        )
+
 
     validated = competition.copy()
     validated.setdefault("supports_favorites", validated.get("is_active") is True)

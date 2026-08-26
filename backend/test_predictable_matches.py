@@ -22,6 +22,7 @@ def match_fixture(match_id, **overrides):
         "is_upcoming": True,
         "is_live": False,
         "is_finished": False,
+        "round": "هفته 2",
         "kickoff_ts": time.time() + 3600,
     }
     match.update(overrides)

@@ -22,6 +22,7 @@ def future_match(match_id="42"):
         "is_upcoming": True,
         "is_live": False,
         "is_finished": False,
+        "round": "هفته 2",
         "kickoff_ts": time.time() + 3600,
     }
 
@@ -66,7 +67,7 @@ class PredictionV2ApiTests(unittest.TestCase):
         )
 
     def test_v2_result_prediction_saves_and_updates_logical_identity(self):
-        with patch("main.get_match_for_season", return_value=future_match()):
+        with patch("main.get_prediction_matches_for_season", return_value=[future_match()]):
             first = self.post_result(predicted_result="home")
 
         self.assertEqual(first.status_code, 200)
@@ -81,7 +82,7 @@ class PredictionV2ApiTests(unittest.TestCase):
         conn.execute("UPDATE predictions SET created_at = '2020-01-01 00:00:00'")
         conn.commit()
         conn.close()
-        with patch("main.get_match_for_season", return_value=future_match()):
+        with patch("main.get_prediction_matches_for_season", return_value=[future_match()]):
             updated = self.post_result(predicted_result="away")
 
         self.assertEqual(updated.status_code, 200)
@@ -95,7 +96,7 @@ class PredictionV2ApiTests(unittest.TestCase):
     def test_exact_score_saves_and_derives_each_outcome(self):
         scores = [(2, 1, "home"), (1, 1, "draw"), (0, 3, "away")]
         for index, (home_score, away_score, expected) in enumerate(scores, start=1):
-            with patch("main.get_match_for_season", return_value=future_match(str(index))):
+            with patch("main.get_prediction_matches_for_season", return_value=[future_match(str(index))]):
                 response = self.client.post(
                     "/prediction",
                     json={
@@ -138,14 +139,14 @@ class PredictionV2ApiTests(unittest.TestCase):
                 "away_score": 0,
             },
         ]
-        with patch("main.get_match_for_season") as resolver:
+        with patch("main.get_prediction_matches_for_season") as resolver:
             for body in bodies:
                 with self.subTest(body=body):
                     self.assertEqual(self.client.post("/prediction", json=body).status_code, 400)
         resolver.assert_not_called()
 
     def test_legacy_numeric_worldcup_body_is_rejected_after_archival(self):
-        with patch("main.get_match_for_season", return_value=future_match()) as resolver:
+        with patch("main.get_prediction_matches_for_season", return_value=[future_match()]) as resolver:
             response = self.client.post(
                 "/prediction",
                 json={"telegram_id": 10, "match_id": 42, "prediction": "draw"},
@@ -187,13 +188,13 @@ class PredictionV2ApiTests(unittest.TestCase):
                 self.assertEqual(response.status_code, status)
                 self.assertEqual(response.json(), {"detail": detail})
 
-        with patch("main.get_match_for_season", return_value=None):
+        with patch("main.get_prediction_matches_for_season", return_value=[]):
             response = self.post_result()
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json(), {"detail": "Match not found"})
 
     def test_premier_league_prediction_saves_with_opaque_match_id(self):
-        with patch("main.get_match_for_season", return_value=future_match("pl-match-id")):
+        with patch("main.get_prediction_matches_for_season", return_value=[future_match("pl-match-id")]):
             response = self.client.post(
                 "/prediction",
                 json={
@@ -232,7 +233,7 @@ class PredictionV2ApiTests(unittest.TestCase):
 
     def test_provider_failure_is_sanitized(self):
         with patch(
-            "main.get_match_for_season",
+            "main.get_prediction_matches_for_season",
             side_effect=competition_data_service.CompetitionDataProviderError("private provider detail"),
         ):
             response = self.post_result()
