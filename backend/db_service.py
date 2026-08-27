@@ -652,6 +652,42 @@ def get_reminders_from_db(telegram_id, competition_key=None, season_key=None):
     return [_decode_reminder_row(row) for row in rows]
 
 
+def update_reminder_snapshot(
+    telegram_id, match_id, competition_key, season_key, match
+):
+    competition_key, season_key, match_id = _canonical_reminder_identity(
+        match_id, competition_key, season_key
+    )
+    snapshot = dict(match)
+    snapshot.pop("notified", None)
+    snapshot["competition_key"] = competition_key
+    snapshot["season_key"] = season_key
+    snapshot["match_id"] = match_id
+    snapshot["id"] = match_id
+    match_data = json.dumps(snapshot, ensure_ascii=False)
+
+    conn = get_connection()
+    try:
+        state = reminders_schema_state(conn)
+        if state != "v2":
+            raise RuntimeError("Scoped reminder snapshots require reminders_v2")
+        cursor = conn.execute(
+            """
+            UPDATE reminders
+            SET match_data = ?
+            WHERE telegram_id = ?
+              AND competition_key = ?
+              AND season_key = ?
+              AND match_id = ?
+            """,
+            (match_data, telegram_id, competition_key, season_key, match_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
 def delete_reminder_from_db(
     telegram_id, match_id, competition_key=None, season_key=None
 ):
@@ -1074,16 +1110,35 @@ def get_relevant_users_for_match(match):
     if match_id is None:
         return []
 
+    competition_key, season_key, canonical_match_id = _canonical_reminder_identity(
+        match_id,
+        match.get("competition_key"),
+        match.get("season_key"),
+    )
     conn = get_connection()
     try:
-        rows = conn.execute(
-            """
-            SELECT telegram_id
-            FROM reminders
-            WHERE match_id = ?
-            """,
-            (match_id,),
-        ).fetchall()
+        state = reminders_schema_state(conn)
+        if state == "v2":
+            rows = conn.execute(
+                """
+                SELECT telegram_id
+                FROM reminders
+                WHERE competition_key = ?
+                  AND season_key = ?
+                  AND match_id = ?
+                """,
+                (competition_key, season_key, canonical_match_id),
+            ).fetchall()
+        elif state == "legacy":
+            legacy_match_id = _require_legacy_worldcup_identity(
+                competition_key, season_key, canonical_match_id
+            )
+            rows = conn.execute(
+                "SELECT telegram_id FROM reminders WHERE match_id = ?",
+                (legacy_match_id,),
+            ).fetchall()
+        else:
+            raise RuntimeError("Unsupported reminders schema")
     finally:
         conn.close()
 

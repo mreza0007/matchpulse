@@ -4,6 +4,12 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from competition_data_service import get_matches_for_season
+from reminder_service import (
+    ReminderEligibilityError,
+    parse_reminder_kickoff,
+    validate_reminder_eligibility,
+)
 from services.worldcup_adapter import repair_text
 
 from db_service import (
@@ -15,11 +21,15 @@ from db_service import (
     mark_notification_sent,
     mark_live_notification_sent,
     mark_reminder_notified,
+    update_reminder_snapshot,
     normalize_team_key,
 )
 
 DEFAULT_BALL = "\u26bd"
 DEFAULT_STAR = "\u2b50"
+LEGACY_REMINDER_COMPETITION_KEY = "worldcup2026"
+LEGACY_REMINDER_SEASON_KEY = "2026"
+
 
 scheduler = BackgroundScheduler()
 pending_final_confirmations = {}
@@ -79,6 +89,26 @@ def build_match_message(match, reason):
         f"\U0001f4cd {match.get('city')}\n\n"
         "\u0628\u0627\u0632\u06cc \u062a\u0627 \u062d\u062f\u0648\u062f \u06cc\u06a9 \u0633\u0627\u0639\u062a \u062f\u06cc\u06af\u0631 \u0634\u0631\u0648\u0639 \u0645\u06cc\u200c\u0634\u0648\u062f."
     )
+
+
+def build_generic_match_message(match, reason):
+    lines = [f"\U0001f514 {reason}", "", fixture_line(match), ""]
+    date_value = match.get("date_iran") or match.get("date")
+    time_value = match.get("time_iran") or match.get("time")
+    if date_value or time_value:
+        schedule = " - ".join(
+            str(value) for value in (date_value, time_value) if value
+        )
+        lines.append(f"\U0001f552 {schedule}")
+    if match.get("stadium"):
+        lines.append(f"\U0001f3df {match['stadium']}")
+    if match.get("city"):
+        lines.append(f"\U0001f4cd {match['city']}")
+    lines.extend([
+        "",
+        "بازی تا حدود یک ساعت دیگر شروع می‌شود.",
+    ])
+    return "\n".join(lines)
 
 
 def parse_kickoff(match):
@@ -163,8 +193,8 @@ def notification_already_handled(notification_key):
     return notification_key in scheduler_state["suppressed_notifications"] or has_sent_notification(notification_key)
 
 
-def should_notify(match):
-    now = datetime.now(timezone.utc)
+def should_notify(match, now=None):
+    current_time = datetime.now(timezone.utc) if now is None else now
     kickoff = parse_kickoff(match)
 
     if kickoff is None:
@@ -173,7 +203,7 @@ def should_notify(match):
     notify_from = kickoff - timedelta(minutes=65)
     notify_until = kickoff - timedelta(minutes=55)
 
-    return notify_from <= now <= notify_until
+    return notify_from <= current_time <= notify_until
 
 
 def normalized_status(match):
@@ -1121,7 +1151,170 @@ def seed_existing_match_notification_state():
     print(f"Seeded existing match notification state without sending ({seeded_count} keys)")
 
 
-def check_manual_reminders():
+def reminder_identity(telegram_id, match):
+    competition_key = str(match.get("competition_key") or "").strip().lower()
+    season_key = str(match.get("season_key") or "").strip().lower()
+    match_id_value = str(
+        match.get("match_id") or match.get("id") or ""
+    ).strip()
+    if not competition_key or not season_key or not match_id_value:
+        return None
+    return int(telegram_id), competition_key, season_key, match_id_value
+
+
+def manual_reminder_key(identity):
+    telegram_id, competition_key, season_key, match_id_value = identity
+    return (
+        f"manual:{telegram_id}:{competition_key}:"
+        f"{season_key}:{match_id_value}"
+    )
+
+
+def scoped_match_reference(identity):
+    _telegram_id, competition_key, season_key, match_id_value = identity
+    return f"{competition_key}:{season_key}:{match_id_value}"
+
+
+def is_legacy_worldcup_reminder(identity):
+    return (
+        identity[1] == LEGACY_REMINDER_COMPETITION_KEY
+        and identity[2] == LEGACY_REMINDER_SEASON_KEY
+    )
+
+
+def reminder_in_delivery_window(match, now=None):
+    current_time = datetime.now(timezone.utc) if now is None else now
+    try:
+        kickoff = parse_reminder_kickoff(match)
+    except ReminderEligibilityError:
+        return False
+    notify_from = kickoff - timedelta(minutes=65)
+    notify_until = kickoff - timedelta(minutes=55)
+    return notify_from <= current_time <= notify_until
+
+
+def send_manual_reminder(bot_app, telegram_id, match, identity, now=None):
+    if match.get("notified"):
+        return False
+
+    if is_legacy_worldcup_reminder(identity):
+        if not should_notify(match, now=now):
+            return False
+        message_builder = build_match_message
+    else:
+        try:
+            validate_reminder_eligibility(match, now=now)
+        except ReminderEligibilityError:
+            return False
+        if not reminder_in_delivery_window(match, now=now):
+            return False
+        message_builder = build_generic_match_message
+
+    notification_key = manual_reminder_key(identity)
+    if has_sent_notification(notification_key):
+        print(f"Skipped duplicate notification: {notification_key}")
+        return False
+
+    try:
+        text = message_builder(
+            match,
+            "\u06cc\u0627\u062f\u0622\u0648\u0631\u06cc \u0645\u0633\u0627\u0628\u0642\u0647",
+        )
+    except Exception:
+        print(f"Failed manual reminder formatting: {notification_key}")
+        return False
+
+    if not send_once(
+        bot_app,
+        telegram_id,
+        text,
+        notification_key,
+        scoped_match_reference(identity),
+        "manual reminder",
+    ):
+        return False
+
+    try:
+        marked = mark_reminder_notified(
+            telegram_id,
+            identity[3],
+            identity[1],
+            identity[2],
+        )
+    except Exception:
+        print(f"Failed to mark manual reminder notified: {notification_key}")
+        return False
+    if marked:
+        match["notified"] = True
+    return marked
+
+
+def reminder_snapshot_changed(stored, refreshed):
+    stored_snapshot = dict(stored)
+    stored_snapshot.pop("notified", None)
+    refreshed_snapshot = dict(refreshed)
+    refreshed_snapshot.pop("notified", None)
+    return stored_snapshot != refreshed_snapshot
+
+
+def refresh_generic_reminder_group(scope, entries, now=None):
+    competition_key, season_key = scope
+    try:
+        matches = get_matches_for_season(
+            competition_key, season_key, status="all"
+        )
+        if not isinstance(matches, list):
+            raise RuntimeError("Unavailable season matches")
+    except Exception:
+        print(
+            "Reminder refresh failed for "
+            f"competition_key={competition_key} season_key={season_key}"
+        )
+        return
+
+    matches_by_id = {
+        str(match.get("id")).strip(): match
+        for match in matches
+        if isinstance(match, dict)
+        and match.get("id") is not None
+        and str(match.get("id")).strip()
+    }
+    bot_app = scheduler_state["bot_app"]
+    for telegram_id, reminder, identity in entries:
+        authoritative = matches_by_id.get(identity[3])
+        if authoritative is None:
+            continue
+        refreshed = dict(authoritative)
+        refreshed["competition_key"] = competition_key
+        refreshed["season_key"] = season_key
+        refreshed["match_id"] = identity[3]
+        refreshed["id"] = identity[3]
+        refreshed["notified"] = False
+        if reminder_snapshot_changed(reminder, refreshed):
+            try:
+                updated = update_reminder_snapshot(
+                    telegram_id,
+                    identity[3],
+                    competition_key,
+                    season_key,
+                    refreshed,
+                )
+            except Exception:
+                print(
+                    "Reminder snapshot update failed: "
+                    f"{manual_reminder_key(identity)}"
+                )
+                continue
+            if not updated:
+                continue
+        reminder.clear()
+        reminder.update(refreshed)
+        send_manual_reminder(
+            bot_app, telegram_id, reminder, identity, now=now
+        )
+
+
+def check_manual_reminders(now=None):
     bot_app = scheduler_state["bot_app"]
     reminders = scheduler_state["reminders"]
 
@@ -1129,22 +1322,31 @@ def check_manual_reminders():
         print("Manual reminders skipped: missing bot or reminders.")
         return
 
+    generic_groups = {}
+    legacy_entries = []
     for telegram_id, user_reminders in list(reminders.items()):
         for match in user_reminders:
-            if match.get("notified") or not should_notify(match):
+            if match.get("notified"):
                 continue
-
-            notification_key = f"manual:{telegram_id}:{match['id']}"
-
-            if has_sent_notification(notification_key):
-                print(f"Skipped duplicate notification: {notification_key}")
+            identity = reminder_identity(telegram_id, match)
+            if identity is None:
+                print(
+                    "Skipped reminder with invalid identity "
+                    f"for user_id={telegram_id}"
+                )
                 continue
+            entry = (telegram_id, match, identity)
+            if is_legacy_worldcup_reminder(identity):
+                legacy_entries.append(entry)
+            else:
+                generic_groups.setdefault(identity[1:3], []).append(entry)
 
-            text = build_match_message(match, "\u06cc\u0627\u062f\u0622\u0648\u0631\u06cc \u0645\u0633\u0627\u0628\u0642\u0647")
-
-            if send_once(bot_app, telegram_id, text, notification_key, match["id"], "manual reminder"):
-                mark_reminder_notified(telegram_id, match["id"])
-                match["notified"] = True
+    for telegram_id, match, identity in legacy_entries:
+        send_manual_reminder(
+            bot_app, telegram_id, match, identity, now=now
+        )
+    for scope, entries in generic_groups.items():
+        refresh_generic_reminder_group(scope, entries, now=now)
 
 
 def check_match_start_notifications():
