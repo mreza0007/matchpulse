@@ -554,8 +554,9 @@ def _require_legacy_worldcup_identity(competition_key, season_key, match_id):
 def _decode_reminder_row(row):
     competition_key, season_key, match_id, match_data, notified = row
     match = json.loads(match_data)
-    match.setdefault("competition_key", competition_key)
-    match.setdefault("season_key", season_key)
+    match["competition_key"] = competition_key
+    match["season_key"] = season_key
+    match["match_id"] = match_id
     match.setdefault("id", match_id)
     match["notified"] = bool(notified)
     return match

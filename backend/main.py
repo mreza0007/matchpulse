@@ -48,6 +48,17 @@ from prediction_evaluation_service import (
 )
 from real_data_service import get_match_events, get_real_matches, get_real_teams, get_worldcup_summary
 from services.worldcup_adapter import get_match_live_from_worldcup_wrapper, start_worldcup_wrapper_poller
+from reminder_service import (
+    ReminderCapabilityError,
+    ReminderCompetitionNotFoundError,
+    ReminderEligibilityError,
+    ReminderMatchNotFoundError,
+    ReminderProviderError,
+    ReminderRequestError,
+    ReminderSeasonNotFoundError,
+    normalize_reminder_request,
+    prepare_reminder_snapshot,
+)
 
 from db_service import (
     init_db,
@@ -125,7 +136,9 @@ class FavoriteTeamData(BaseModel):
 
 class ReminderData(BaseModel):
     telegram_id: int
-    match_id: int
+    match_id: StrictInt | StrictStr
+    competition_key: str | None = None
+    season_key: str | None = None
 
 
 class PredictionData(BaseModel):
@@ -699,33 +712,43 @@ def delete_favorite_team(data: FavoriteTeamData):
 
 @api.post("/reminder")
 def save_reminder(data: ReminderData):
-    competition = get_competition("worldcup2026")
-    if competition.get("supports_reminders") is not True:
+    try:
+        request = normalize_reminder_request(data)
+        selected_match = prepare_reminder_snapshot(request)
+    except ReminderRequestError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except ReminderCompetitionNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Competition not found") from error
+    except ReminderSeasonNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Season not found") from error
+    except ReminderCapabilityError as error:
         raise HTTPException(
             status_code=501,
             detail="Competition reminders not supported",
+        ) from error
+    except ReminderMatchNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Match not found") from error
+    except ReminderProviderError as error:
+        raise HTTPException(status_code=502, detail="Matches provider unavailable") from error
+    except ReminderEligibilityError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+    try:
+        created = save_reminder_to_db(
+            data.telegram_id,
+            selected_match,
+            request["competition_key"],
+            request["season_key"],
         )
+        user_reminders = get_reminders_from_db(data.telegram_id)
+    except (RuntimeError, sqlite3.Error) as error:
+        raise HTTPException(status_code=503, detail="Reminder storage unavailable") from error
 
-    matches = get_real_matches(status="all")
-    selected_match = None
-
-    for match in matches:
-        if match["id"] == data.match_id:
-            selected_match = match
-            break
-
-    if selected_match is None:
-        return {
-            "success": False,
-            "message": "Match not found",
-        }
-
-    save_reminder_to_db(data.telegram_id, selected_match)
-
-    reminders[data.telegram_id] = get_reminders_from_db(data.telegram_id)
+    reminders[data.telegram_id] = user_reminders
 
     return {
         "success": True,
+        "created": created,
         "telegram_id": data.telegram_id,
         "reminders": reminders[data.telegram_id],
     }
@@ -733,7 +756,10 @@ def save_reminder(data: ReminderData):
 
 @api.get("/reminders/{telegram_id}")
 def get_reminders(telegram_id: int):
-    user_reminders = get_reminders_from_db(telegram_id)
+    try:
+        user_reminders = get_reminders_from_db(telegram_id)
+    except (RuntimeError, sqlite3.Error) as error:
+        raise HTTPException(status_code=503, detail="Reminder storage unavailable") from error
     reminders[telegram_id] = user_reminders
 
     return {
@@ -745,8 +771,24 @@ def get_reminders(telegram_id: int):
 
 @api.delete("/reminder")
 def delete_reminder(data: ReminderData):
-    deleted = delete_reminder_from_db(data.telegram_id, data.match_id)
-    reminders[data.telegram_id] = get_reminders_from_db(data.telegram_id)
+    try:
+        request = normalize_reminder_request(data)
+    except ReminderRequestError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    try:
+        if request["is_legacy"]:
+            deleted = delete_reminder_from_db(data.telegram_id, data.match_id)
+        else:
+            deleted = delete_reminder_from_db(
+                data.telegram_id,
+                request["match_id"],
+                request["competition_key"],
+                request["season_key"],
+            )
+        user_reminders = get_reminders_from_db(data.telegram_id)
+    except (RuntimeError, sqlite3.Error) as error:
+        raise HTTPException(status_code=503, detail="Reminder storage unavailable") from error
+    reminders[data.telegram_id] = user_reminders
 
     return {
         "success": True,
