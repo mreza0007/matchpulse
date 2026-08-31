@@ -2,6 +2,8 @@ import FavoriteTeamItem from "../components/profile/FavoriteTeamItem.jsx";
 import TeamFlag from "../components/teams/TeamFlag.jsx";
 import { groupActiveCompetitionFavorites } from "../utils/competitionCapabilities.js";
 import { formatTehranMatchDateTime } from "../utils/dates.js";
+import { reminderIdentityKeyFromRecord } from "../utils/reminders.js";
+import { getLocalizedTeamName } from "../utils/teams.js";
 
 function FavoriteGroup({ favorites, isPending, lang, onRemove, t, title }) {
   return (
@@ -37,6 +39,8 @@ export default function ProfilePage({
   onRemoveReminder,
   predictionStats,
   reminders,
+  reminderMessage,
+  reminderPendingKeys,
   t,
   telegramUser,
 }) {
@@ -145,29 +149,41 @@ export default function ProfilePage({
             <span>{reminders.length}</span>
           </div>
           {reminders.length === 0 && <p>{t.noReminders}</p>}
-          {reminders.map((match) => {
+          {reminderMessage && <p className="status-message">{reminderMessage}</p>}
+          {reminders.map((match, index) => {
             const reminderDateTime = formatTehranMatchDateTime(match, lang);
+            const identityKey = reminderIdentityKeyFromRecord(match);
+            const reminderKey = identityKey || `malformed-reminder:${index}`;
+            const isReminderPending = Boolean(identityKey && reminderPendingKeys.has(identityKey));
+            const homeName = getLocalizedTeamName(match, "home", lang);
+            const awayName = getLocalizedTeamName(match, "away", lang);
+            const competitionContext = [
+              String(match?.competition_key || "").replaceAll("_", " "),
+              match?.season_key,
+            ].filter(Boolean).join(" · ");
             return (
-              <div className="profile-item reminder-item" key={match.id}>
-                <TeamFlag flagEmoji={match.home_flag} teamName={match.home_en} />
+              <div className="profile-item reminder-item" key={reminderKey}>
+                <TeamFlag flagEmoji={match?.home_flag} teamName={homeName} />
                 <div className="profile-item-text">
                   <strong>
                     <span className="profile-reminder-match">
-                      {match.home_en}
+                      {homeName}
                       <span>{t.vs}</span>
-                      <TeamFlag flagEmoji={match.away_flag} teamName={match.away_en} />
-                      {match.away_en}
+                      <TeamFlag flagEmoji={match?.away_flag} teamName={awayName} />
+                      {awayName}
                     </span>
                   </strong>
+                  <small>{competitionContext}</small>
                   <small>{reminderDateTime.compact}</small>
                 </div>
                 {canRemoveReminders && (
                   <button
                     className="chip-btn profile-remove-btn"
-                    onClick={() => onRemoveReminder(match.id)}
+                    disabled={!identityKey || isReminderPending}
+                    onClick={() => onRemoveReminder(match)}
                     type="button"
                   >
-                    {t.cancelReminder}
+                    {isReminderPending ? t.reminderSaving : t.cancelReminder}
                   </button>
                 )}
               </div>

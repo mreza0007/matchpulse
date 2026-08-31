@@ -17,6 +17,11 @@ import {
   competitionExperience,
   supportsNewCompetitionAction,
 } from "../utils/competitionCapabilities.js";
+import {
+  isReminderEligibleMatch,
+  reminderIdentityFromMatch,
+  reminderIdentityKey,
+} from "../utils/reminders.js";
 import { getKickoffTime, groupMatchesByDate } from "../utils/dates.js";
 import {
   isFutureMatchStatus,
@@ -66,19 +71,39 @@ function RetryState({ message, onRetry, t }) {
   );
 }
 
-function DisplayMatchCard({ lang, match, t }) {
+function DisplayMatchCard({
+  canAddReminders,
+  competition,
+  lang,
+  match,
+  onReminderToggle,
+  reminderIdentityKeys,
+  reminderPendingKeys,
+  t,
+}) {
+  const identity = reminderIdentityFromMatch(competition, match);
+  const identityKey = reminderIdentityKey(identity);
+  const showReminder = Boolean(
+    canAddReminders
+    && identity
+    && isReminderEligibleMatch(match),
+  );
+
   return (
     <MatchCard
       awayTeam={match.away_logo ? { logo: match.away_logo } : undefined}
       favoriteTeamIds={EMPTY_SET}
       favoriteTeamKeys={EMPTY_SET}
       homeTeam={match.home_logo ? { logo: match.home_logo } : undefined}
+      isReminderActive={Boolean(identityKey && reminderIdentityKeys.has(identityKey))}
+      isReminderPending={Boolean(identityKey && reminderPendingKeys.has(identityKey))}
       lang={lang}
       match={match}
+      onReminderToggle={(selectedMatch) => onReminderToggle(competition, selectedMatch)}
       showEvents={false}
       showFavorites={false}
       showPredictions={false}
-      showReminder={false}
+      showReminder={showReminder}
       showStatusSummary
       t={t}
     />
@@ -110,11 +135,18 @@ function ActiveCompetitionPage({
   lang,
   onBack,
   onFavoriteToggle,
+  onReminderToggle,
+  reminderIdentityKeys,
+  reminderPendingKeys,
+  reminderMessage,
   t,
   telegramId,
 }) {
   const canAddFavorites = supportsNewCompetitionAction(
     competition, "supports_favorites",
+  );
+  const canAddReminders = supportsNewCompetitionAction(
+    competition, "supports_reminders",
   );
   const isLeague = (
     competition.format === "league"
@@ -334,6 +366,20 @@ function ActiveCompetitionPage({
       .slice(0, 3),
     [matches.items, primaryMatch],
   );
+  const renderDisplayMatchCard = (match, key) => (
+    <DisplayMatchCard
+      canAddReminders={canAddReminders}
+      competition={competition}
+      key={key}
+      lang={lang}
+      match={match}
+      onReminderToggle={onReminderToggle}
+      reminderIdentityKeys={reminderIdentityKeys}
+      reminderPendingKeys={reminderPendingKeys}
+      t={t}
+    />
+  );
+
 
   const selectTab = (tab) => {
     setActiveTab(tab);
@@ -385,20 +431,19 @@ function ActiveCompetitionPage({
         {primaryMatch && (
           <section className="competition-preview-section">
             <h2>{isLiveMatch(primaryMatch) ? t.liveMatches : t.nextMatch}</h2>
-            <DisplayMatchCard lang={lang} match={primaryMatch} t={t} />
+            {renderDisplayMatchCard(
+              primaryMatch,
+              `${competition.competition_key}:${primaryMatch.id}`,
+            )}
           </section>
         )}
         {previewMatches.length > 0 && (
           <section className="competition-preview-section">
             <h2>{t.recentUpcomingMatches}</h2>
             <div className="competition-preview-matches">
-              {previewMatches.map((match, index) => (
-                <DisplayMatchCard
-                  key={`${competition.competition_key}:${match.id ?? index}`}
-                  lang={lang}
-                  match={match}
-                  t={t}
-                />
+              {previewMatches.map((match, index) => renderDisplayMatchCard(
+                match,
+                `${competition.competition_key}:${match.id ?? index}`,
               ))}
             </div>
           </section>
@@ -474,13 +519,9 @@ function ActiveCompetitionPage({
           <section className="match-day-group" key={group.dateKey}>
             <h2 className="match-day-header">{group.label || t.dateUnavailable}</h2>
             <div className="match-day-list">
-              {group.matches.map((match, index) => (
-                <DisplayMatchCard
-                  key={`${competition.competition_key}:${match.id ?? index}`}
-                  lang={lang}
-                  match={match}
-                  t={t}
-                />
+              {group.matches.map((match, index) => renderDisplayMatchCard(
+                match,
+                `${competition.competition_key}:${match.id ?? index}`,
               ))}
             </div>
           </section>
@@ -582,6 +623,10 @@ function ActiveCompetitionPage({
             key={`${round.round_key || "round"}:${index}`}
             lang={lang}
             round={round}
+            renderMatch={(match, matchIndex) => renderDisplayMatchCard(
+              match,
+              `${competition.competition_key}:${round.round_key}:${match.id ?? matchIndex}`,
+            )}
             t={t}
           />
         ))}
@@ -614,6 +659,7 @@ function ActiveCompetitionPage({
         </div>
       </div>
 
+      {reminderMessage && <p className="status-message">{reminderMessage}</p>}
       {tabs.length > 0 ? (
         <>
           <CompetitionTabs activeTab={activeTab} onChange={selectTab} tabs={tabs} t={t} />

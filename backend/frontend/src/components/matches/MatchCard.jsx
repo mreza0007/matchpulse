@@ -29,6 +29,7 @@ export default function MatchCard({
   t,
   showReminder = true,
   onReminderToggle,
+  isReminderPending = false,
   isReminderActive = false,
   homeTeam,
   awayTeam,
@@ -196,13 +197,19 @@ export default function MatchCard({
 
       {showReminder && (
         <button
+          aria-busy={isReminderPending}
+          aria-pressed={isReminderActive}
           className={`remind-btn ${isReminderActive ? "active" : ""}`}
+          disabled={isReminderPending}
           onClick={(event) => {
             event.stopPropagation();
-            onReminderToggle(match.id);
+            onReminderToggle?.(match);
           }}
+          type="button"
         >
-          {isReminderActive ? `🔕 ${t.cancelReminder}` : `🔔 ${t.remind}`}
+          {isReminderPending
+            ? t.reminderSaving
+            : (isReminderActive ? `🔕 ${t.cancelReminder}` : `🔔 ${t.remind}`)}
         </button>
       )}
 

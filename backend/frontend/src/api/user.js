@@ -1,4 +1,5 @@
 import { API_BASE_URL, request } from "./client.js";
+import { reminderRequestBody } from "../utils/reminders.js";
 
 const jsonHeaders = { "Content-Type": "application/json" };
 
@@ -28,19 +29,19 @@ export function fetchPredictionStats(telegramId) {
   return request(`${API_BASE_URL}/prediction-stats/${telegramId}`);
 }
 
-export function createReminder(telegramId, matchId) {
+export function createReminder(telegramId, identity) {
   return request(`${API_BASE_URL}/reminder`, {
     method: "POST",
     headers: jsonHeaders,
-    body: JSON.stringify({ telegram_id: telegramId, match_id: matchId }),
+    body: JSON.stringify(reminderRequestBody(telegramId, identity)),
   });
 }
 
-export function deleteReminder(telegramId, matchId) {
+export function deleteReminder(telegramId, identity) {
   return request(`${API_BASE_URL}/reminder`, {
     method: "DELETE",
     headers: jsonHeaders,
-    body: JSON.stringify({ telegram_id: telegramId, match_id: matchId }),
+    body: JSON.stringify(reminderRequestBody(telegramId, identity)),
   });
 }
 

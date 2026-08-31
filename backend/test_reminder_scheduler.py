@@ -399,9 +399,21 @@ class ReminderSchedulerTests(unittest.TestCase):
         )
         log.assert_any_call(f"Skipped duplicate notification: {expected_key}")
 
-    def test_public_capabilities_remain_disabled(self):
-        for competition in competition_service.get_competitions():
-            self.assertIs(competition["supports_reminders"], False)
+    def test_public_capabilities_enable_only_active_generic_competitions(self):
+        competitions = {
+            item["competition_key"]: item
+            for item in competition_service.get_competitions()
+        }
+        enabled = {
+            "premier_league", "persian_gulf_pro_league", "la_liga",
+            "serie_a", "bundesliga", "ligue_1", "champions_league",
+            "europa_league",
+        }
+        self.assertEqual(
+            {key for key, item in competitions.items() if item["supports_reminders"]},
+            enabled,
+        )
+        self.assertIs(competitions["worldcup2026"]["supports_reminders"], False)
 
 
 class ReminderSchedulerStorageTests(unittest.TestCase):

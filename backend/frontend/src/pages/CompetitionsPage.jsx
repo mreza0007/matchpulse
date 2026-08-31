@@ -20,6 +20,10 @@ function CompetitionListSkeleton() {
 
 export default function CompetitionsPage({
   favoriteIdentityKeys,
+  onReminderToggle,
+  reminderIdentityKeys,
+  reminderMessage,
+  reminderPendingKeys,
   favoriteMessage,
   favoritePendingKeys,
   lang,
@@ -80,6 +84,10 @@ export default function CompetitionsPage({
   if (selectedCompetition) {
     return (
       <CompetitionPage
+        onReminderToggle={onReminderToggle}
+        reminderIdentityKeys={reminderIdentityKeys}
+        reminderMessage={reminderMessage}
+        reminderPendingKeys={reminderPendingKeys}
         competition={selectedCompetition}
         favoriteIdentityKeys={favoriteIdentityKeys}
         favoriteMessage={favoriteMessage}

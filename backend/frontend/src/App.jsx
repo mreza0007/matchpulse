@@ -46,6 +46,17 @@ import {
 import { getKickoffTime, groupMatchesByDate } from "./utils/dates.js";
 import { normalizeTeamKey } from "./utils/teams.js";
 import { supportsNewCompetitionAction } from "./utils/competitionCapabilities.js";
+import {
+  buildReminderIdentitySet,
+  finishReminderMutation,
+  isReminderEligibleMatch,
+  reminderErrorTranslationKey,
+  reminderIdentityFromMatch,
+  reminderIdentityFromRecord,
+  reminderIdentityKey,
+  reminderIdentityKeyFromRecord,
+  tryBeginReminderMutation,
+} from "./utils/reminders.js";
 
 const EMPTY_SET = new Set();
 const LEGACY_INLINE_MATCH_ACTIONS_ENABLED = false;
@@ -106,6 +117,7 @@ function App() {
   const [favoritePendingKeys, setFavoritePendingKeys] = useState(() => new Set());
   const [reminders, setReminders] = useState([]);
   const [reminderMessage, setReminderMessage] = useState("");
+  const [reminderPendingKeys, setReminderPendingKeys] = useState(() => new Set());
   const [predictionsByMatch, setPredictionsByMatch] = useState({});
   const [predictionStats, setPredictionStats] = useState({ points: 0, correct: 0, wrong: 0, pending: 0, total: 0 });
   const [savingPredictionMatchId, setSavingPredictionMatchId] = useState(null);
@@ -123,6 +135,9 @@ function App() {
   const favoriteMutationVersion = useRef(0);
   const favoriteMutationControllers = useRef(new Set());
   const favoriteRequestController = useRef(null);
+  const reminderLoadVersion = useRef(0);
+  const reminderMutationVersion = useRef(0);
+  const reminderPendingKeysRef = useRef(new Set());
   const predictionMutationVersion = useRef(0);
   const predictionSaveRequests = useRef(new Map());
 
@@ -144,8 +159,8 @@ function App() {
     [favoriteTeams],
   );
 
-  const reminderIds = useMemo(
-    () => new Set(reminders.map((match) => match.id)),
+  const reminderIdentityKeys = useMemo(
+    () => buildReminderIdentitySet(reminders),
     [reminders],
   );
 
@@ -409,6 +424,7 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const reminderRequestVersion = ++reminderLoadVersion.current;
     if (!telegramId) return;
 
     saveTelegramUser(telegramId, telegramUser)
@@ -422,13 +438,24 @@ function App() {
         setIsUserSaved(false);
       });
 
+    const reminderMutationVersionAtRequest = reminderMutationVersion.current;
     fetchReminders(telegramId)
       .then((response) => {
         if (!response.ok) throw new Error(`Reminders request failed: ${response.status}`);
         return response.json();
       })
-      .then((data) => setReminders(Array.isArray(data.reminders) ? data.reminders : []))
-      .catch((error) => console.error("Failed to load reminders:", error));
+      .then((data) => {
+        if (
+          reminderLoadVersion.current !== reminderRequestVersion
+          || reminderMutationVersion.current !== reminderMutationVersionAtRequest
+        ) return;
+        setReminders(Array.isArray(data.reminders) ? data.reminders : []);
+      })
+      .catch((error) => {
+        if (reminderLoadVersion.current === reminderRequestVersion) {
+          console.error("Failed to load reminders:", error);
+        }
+      });
 
     const predictionFetchVersion = predictionMutationVersion.current;
     fetchPredictions(telegramId)
@@ -680,55 +707,107 @@ function App() {
     }
   };
 
-  const addReminder = (matchId) => {
-    if (!LEGACY_INLINE_MATCH_ACTIONS_ENABLED) return;
+  const reminderFailureMessage = (status) => (
+    t[reminderErrorTranslationKey(status)] || t.reminderError || t.unavailable
+  );
+  const beginReminderMutation = (identityKey) => {
+    if (!tryBeginReminderMutation(reminderPendingKeysRef.current, identityKey)) {
+      return false;
+    }
+    setReminderPendingKeys(new Set(reminderPendingKeysRef.current));
+    return true;
+  };
+  const endReminderMutation = (identityKey) => {
+    finishReminderMutation(reminderPendingKeysRef.current, identityKey);
+    setReminderPendingKeys(new Set(reminderPendingKeysRef.current));
+  };
+  const reminderResponse = (response) => {
+    if (response.ok) return response.json();
+    const error = new Error("Reminder request failed");
+    error.status = response.status;
+    throw error;
+  };
 
+  const addReminder = (competition, match) => {
+    const identity = reminderIdentityFromMatch(competition, match);
+    const identityKey = reminderIdentityKey(identity);
+    if (
+      !identity
+      || !supportsNewCompetitionAction(competition, "supports_reminders")
+      || !isReminderEligibleMatch(match)
+    ) {
+      setReminderMessage(t.reminderIneligible);
+      return;
+    }
     if (!telegramId) {
       setReminderMessage(t.unavailable);
       return;
     }
+    if (!beginReminderMutation(identityKey)) return;
 
-    createReminder(telegramId, matchId)
-      .then((response) => {
-        if (!response.ok) throw new Error(`Reminder request failed: ${response.status}`);
-        return response.json();
-      })
+    setReminderMessage("");
+    createReminder(telegramId, identity)
+      .then(reminderResponse)
       .then((data) => {
-        setReminders(Array.isArray(data.reminders) ? data.reminders : []);
+        const serverReminders = Array.isArray(data.reminders) ? data.reminders : [];
+        const serverReminder = serverReminders.find(
+          (item) => reminderIdentityKeyFromRecord(item) === identityKey,
+        );
+        if (!serverReminder) throw new Error("Reminder response unavailable");
+        reminderMutationVersion.current += 1;
+        setReminders((current) => [
+          ...current.filter(
+            (item) => reminderIdentityKeyFromRecord(item) !== identityKey,
+          ),
+          serverReminder,
+        ]);
         setReminderMessage(t.addedReminder);
       })
       .catch((error) => {
-        console.error("Failed to add reminder:", error);
-        setReminderMessage(t.unavailable);
-      });
+        console.error("Failed to add reminder", { status: error.status || 0 });
+        setReminderMessage(reminderFailureMessage(error.status));
+      })
+      .finally(() => endReminderMutation(identityKey));
   };
 
-  const removeReminder = (matchId) => {
+  const removeReminder = (reminder) => {
+    const identity = reminderIdentityFromRecord(reminder);
+    const identityKey = reminderIdentityKey(identity);
+    if (!identity) {
+      setReminderMessage(t.reminderStale);
+      return;
+    }
     if (!telegramId) {
       setReminderMessage(t.unavailable);
       return;
     }
+    if (!beginReminderMutation(identityKey)) return;
 
-    deleteReminder(telegramId, matchId)
-      .then((response) => {
-        if (!response.ok) throw new Error(`Reminder delete failed: ${response.status}`);
-        return response.json();
-      })
-      .then((data) => {
-        setReminders(Array.isArray(data.reminders) ? data.reminders : []);
+    setReminderMessage("");
+    deleteReminder(telegramId, identity)
+      .then(reminderResponse)
+      .then(() => {
+        reminderMutationVersion.current += 1;
+        setReminders((current) => current.filter(
+          (item) => reminderIdentityKeyFromRecord(item) !== identityKey,
+        ));
         setReminderMessage(t.removedReminder);
       })
       .catch((error) => {
-        console.error("Failed to remove reminder:", error);
-        setReminderMessage(t.unavailable);
-      });
+        console.error("Failed to remove reminder", { status: error.status || 0 });
+        setReminderMessage(reminderFailureMessage(error.status));
+      })
+      .finally(() => endReminderMutation(identityKey));
   };
 
-  const toggleReminder = (matchId) => {
-    if (reminderIds.has(matchId)) {
-      removeReminder(matchId);
+  const toggleReminder = (competition, match) => {
+    const identity = reminderIdentityFromMatch(competition, match);
+    const identityKey = reminderIdentityKey(identity);
+    if (!identityKey) return;
+    if (reminderIdentityKeys.has(identityKey)) {
+      removeReminder(identity);
     } else {
-      addReminder(matchId);
+      addReminder(competition, match);
     }
   };
 
@@ -904,8 +983,7 @@ function App() {
         match={match}
         t={t}
         lang={lang}
-        onReminderToggle={toggleReminder}
-        isReminderActive={reminderIds.has(match.id)}
+        isReminderActive={false}
         homeTeam={homeTeam}
         awayTeam={awayTeam}
         favoriteTeamIds={EMPTY_SET}
@@ -991,6 +1069,10 @@ function App() {
           favoritePendingKeys={favoritePendingKeys}
           lang={lang}
           onFavoriteToggle={toggleScopedFavorite}
+          onReminderToggle={toggleReminder}
+          reminderIdentityKeys={reminderIdentityKeys}
+          reminderMessage={reminderMessage}
+          reminderPendingKeys={reminderPendingKeys}
           t={t}
           telegramId={telegramId}
         />
@@ -1086,6 +1168,8 @@ function App() {
           onRemoveFavorite={removeScopedFavorite}
           onRemoveReminder={removeReminder}
           predictionStats={predictionStats}
+          reminderMessage={reminderMessage}
+          reminderPendingKeys={reminderPendingKeys}
           reminders={reminders}
           t={t}
           telegramUser={telegramUser}

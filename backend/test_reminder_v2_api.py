@@ -374,7 +374,7 @@ class ReminderV2ApiTests(unittest.TestCase):
             [("la_liga", "2026-2027", "mp_match_1")],
         )
 
-    def test_competition_directory_keeps_reminders_disabled_until_scheduler_slice(self):
+    def test_competition_directory_advertises_reminders_only_for_enabled_competitions(self):
         response = self.client.get("/competitions")
         self.assertEqual(response.status_code, 200)
         competitions = {
@@ -395,7 +395,7 @@ class ReminderV2ApiTests(unittest.TestCase):
             with self.subTest(competition_key=competition_key):
                 self.assertIs(
                     competitions[competition_key]["supports_reminders"],
-                    False,
+                    True,
                 )
         self.assertIs(competitions["worldcup2026"]["supports_reminders"], False)
         future_default = competition_service.validated_competition(
