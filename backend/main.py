@@ -26,6 +26,7 @@ from competition_data_service import (
     get_match_live_for_season,
     get_matches_for_competition,
     get_matches_for_season,
+    get_overview_matches_for_season,
     get_standings_for_season,
     get_team_for_competition,
     get_teams_for_competition,
@@ -250,6 +251,34 @@ def get_competition_season_matches(competition_key: str, season_key: str, status
     return {
         "count": len(matches),
         "status": status,
+        "matches": matches,
+    }
+
+
+@api.get("/competitions/{competition_key}/seasons/{season_key}/overview")
+def get_competition_season_overview(competition_key: str, season_key: str):
+    competition = get_competition(competition_key)
+    if not competition:
+        raise HTTPException(status_code=404, detail="Competition not found")
+
+    season = get_season(competition_key, season_key)
+    if not season:
+        raise HTTPException(status_code=404, detail="Season not found")
+
+    if competition.get("is_active") is not True or competition.get("competition_key") == "worldcup2026":
+        raise HTTPException(status_code=501, detail="Competition overview not supported")
+
+    try:
+        matches = get_overview_matches_for_season(competition_key, season_key)
+    except CompetitionDataProviderError as error:
+        raise HTTPException(status_code=502, detail="Matches provider unavailable") from error
+    if matches is None:
+        raise HTTPException(status_code=501, detail="Competition season data source not configured")
+
+    return {
+        "competition_key": competition["competition_key"],
+        "season_key": season["season_key"],
+        "count": len(matches),
         "matches": matches,
     }
 

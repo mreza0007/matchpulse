@@ -1,5 +1,6 @@
 from functools import partial
 
+from competition_overview_service import select_overview_matches
 from competition_service import get_competition
 from real_data_service import get_real_matches, get_real_teams, get_worldcup_knockout_rounds
 from season_service import get_default_season
@@ -281,3 +282,10 @@ def get_match_events_for_season(competition_key, season_key, match_id):
         )
     except GenericFootballProviderError as error:
         raise CompetitionDataProviderError() from error
+
+
+def get_overview_matches_for_season(competition_key, season_key):
+    matches = get_matches_for_season(competition_key, season_key, status="all")
+    if matches is None:
+        return None
+    return select_overview_matches(matches)

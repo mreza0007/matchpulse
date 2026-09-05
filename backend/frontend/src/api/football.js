@@ -23,6 +23,12 @@ export function fetchCompetitionSeasonMatches(competitionKey, seasonKey, options
   return request(`${API_BASE_URL}/competitions/${competition}/seasons/${season}/matches?status=all`, options);
 }
 
+export function fetchCompetitionSeasonOverview(competitionKey, seasonKey, options) {
+  const competition = encodeURIComponent(competitionKey);
+  const season = encodeURIComponent(seasonKey);
+  return request(`${API_BASE_URL}/competitions/${competition}/seasons/${season}/overview`, options);
+}
+
 export function fetchCompetitionSeasonTeams(competitionKey, seasonKey, options) {
   const competition = encodeURIComponent(competitionKey);
   const season = encodeURIComponent(seasonKey);

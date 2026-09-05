@@ -3,6 +3,7 @@ import {
   fetchCompetitionGroups,
   fetchCompetitionKnockout,
   fetchCompetitionMatchEvents,
+  fetchCompetitionSeasonOverview,
   fetchCompetitionStandings,
   fetchCompetitionSeasonMatches,
   fetchCompetitionSeasonTeams,
@@ -46,7 +47,8 @@ const FORMAT_TABS = {
   group_knockout: ["overview", "matches", "groups", "knockout", "stats", "teams"],
   knockout_only: ["overview", "matches", "knockout", "stats", "teams"],
 };
-const INITIAL_MATCHES = { items: [], loading: true, loaded: false, failed: false };
+const INITIAL_OVERVIEW_MATCHES = { items: [], loading: true, loaded: false, failed: false };
+const INITIAL_FULL_MATCHES = { items: [], loading: false, loaded: false, failed: false };
 const INITIAL_TEAMS = { items: [], loading: false, loaded: false, failed: false };
 const INITIAL_STANDINGS = { items: [], loading: false, loaded: false, failed: false };
 const INITIAL_GROUPS = { items: [], loading: false, loaded: false, failed: false };
@@ -185,7 +187,8 @@ function ActiveCompetitionPage({
     && (tab !== "knockout" || competition.supports_knockout === true)
   ));
   const [activeTab, setActiveTab] = useState("overview");
-  const [matches, setMatches] = useState(INITIAL_MATCHES);
+  const [overviewMatches, setOverviewMatches] = useState(INITIAL_OVERVIEW_MATCHES);
+  const [fullMatches, setFullMatches] = useState(INITIAL_FULL_MATCHES);
   const [teams, setTeams] = useState(INITIAL_TEAMS);
   const [standings, setStandings] = useState(() => ({
     ...INITIAL_STANDINGS,
@@ -196,11 +199,13 @@ function ActiveCompetitionPage({
     loading: isGroupKnockout,
   }));
   const [knockout, setKnockout] = useState(INITIAL_KNOCKOUT);
-  const [matchesRetryVersion, setMatchesRetryVersion] = useState(0);
+  const [overviewRetryVersion, setOverviewRetryVersion] = useState(0);
+  const [fullMatchesRetryVersion, setFullMatchesRetryVersion] = useState(0);
   const [teamsRetryVersion, setTeamsRetryVersion] = useState(0);
   const [standingsRetryVersion, setStandingsRetryVersion] = useState(0);
   const [groupsRetryVersion, setGroupsRetryVersion] = useState(0);
   const [knockoutRetryVersion, setKnockoutRetryVersion] = useState(0);
+  const [fullMatchesRequested, setFullMatchesRequested] = useState(false);
   const [teamsRequested, setTeamsRequested] = useState(false);
   const [standingsRequested, setStandingsRequested] = useState(isLeague);
   const [groupsRequested, setGroupsRequested] = useState(isGroupKnockout);
@@ -221,6 +226,35 @@ function ActiveCompetitionPage({
   useEffect(() => {
     const controller = new AbortController();
 
+    fetchCompetitionSeasonOverview(
+      competition.competition_key,
+      competition.season_key,
+      { signal: controller.signal },
+    )
+      .then((response) => {
+        if (!response.ok) throw new Error(`Competition matches request failed: ${response.status}`);
+        return response.json();
+      })
+      .then((payload) => {
+        if (controller.signal.aborted) return;
+        const items = Array.isArray(payload?.matches)
+          ? payload.matches.map(normalizeMatchPayload)
+          : [];
+        setOverviewMatches({ items, loading: false, loaded: true, failed: false });
+      })
+      .catch((error) => {
+        if (error.name === "AbortError") return;
+        console.error("Failed to load competition overview matches:", error);
+        setOverviewMatches({ items: [], loading: false, loaded: false, failed: true });
+      });
+
+    return () => controller.abort();
+  }, [competition.competition_key, competition.season_key, overviewRetryVersion]);
+
+  useEffect(() => {
+    if (!fullMatchesRequested) return undefined;
+    const controller = new AbortController();
+
     fetchCompetitionSeasonMatches(
       competition.competition_key,
       competition.season_key,
@@ -235,16 +269,21 @@ function ActiveCompetitionPage({
         const items = Array.isArray(payload?.matches)
           ? payload.matches.map(normalizeMatchPayload)
           : [];
-        setMatches({ items, loading: false, loaded: true, failed: false });
+        setFullMatches({ items, loading: false, loaded: true, failed: false });
       })
       .catch((error) => {
         if (error.name === "AbortError") return;
-        console.error("Failed to load competition matches:", error);
-        setMatches({ items: [], loading: false, loaded: false, failed: true });
+        console.error("Failed to load full competition matches:", error);
+        setFullMatches({ items: [], loading: false, loaded: false, failed: true });
       });
 
     return () => controller.abort();
-  }, [competition.competition_key, competition.season_key, matchesRetryVersion]);
+  }, [
+    competition.competition_key,
+    competition.season_key,
+    fullMatchesRequested,
+    fullMatchesRetryVersion,
+  ]);
 
   useEffect(() => {
     if (!teamsRequested) return undefined;
@@ -392,16 +431,19 @@ function ActiveCompetitionPage({
   ]);
 
   const matchGroups = useMemo(
-    () => groupMatchesByDate(matches.items, lang),
-    [lang, matches.items],
+    () => groupMatchesByDate(fullMatches.items, lang),
+    [fullMatches.items, lang],
   );
-  const primaryMatch = useMemo(() => overviewMatch(matches.items), [matches.items]);
+  const primaryMatch = useMemo(
+    () => overviewMatch(overviewMatches.items),
+    [overviewMatches.items],
+  );
   const previewMatches = useMemo(
-    () => matches.items
+    () => overviewMatches.items
       .filter((match) => match !== primaryMatch)
       .filter((match) => isLiveMatch(match) || isFutureMatchStatus(match) || isResultTabMatch(match))
       .slice(0, 3),
-    [matches.items, primaryMatch],
+    [overviewMatches.items, primaryMatch],
   );
   const toggleMatchEvents = (match) => {
     const identity = competitionEventIdentity(competition, match);
@@ -538,6 +580,10 @@ function ActiveCompetitionPage({
 
   const selectTab = (tab) => {
     setActiveTab(tab);
+    if (tab === "matches" && !fullMatchesRequested) {
+      setFullMatches((current) => ({ ...current, loading: true }));
+      setFullMatchesRequested(true);
+    }
     if (tab === "teams" && !teamsRequested) {
       setTeams((current) => ({ ...current, loading: true }));
       setTeamsRequested(true);
@@ -555,9 +601,13 @@ function ActiveCompetitionPage({
       setKnockoutRequested(true);
     }
   };
-  const retryMatches = () => {
-    setMatches((current) => ({ ...current, loading: true, failed: false }));
-    setMatchesRetryVersion((version) => version + 1);
+  const retryOverviewMatches = () => {
+    setOverviewMatches((current) => ({ ...current, loading: true, failed: false }));
+    setOverviewRetryVersion((version) => version + 1);
+  };
+  const retryFullMatches = () => {
+    setFullMatches((current) => ({ ...current, loading: true, failed: false }));
+    setFullMatchesRetryVersion((version) => version + 1);
   };
   const retryTeams = () => {
     setTeams((current) => ({ ...current, loading: true, failed: false }));
@@ -577,9 +627,9 @@ function ActiveCompetitionPage({
   };
 
   const renderOverviewMatches = () => {
-    if (matches.loading) return <TabSkeleton />;
-    if (matches.failed) return <RetryState message={t.competitionMatchesLoadError} onRetry={retryMatches} t={t} />;
-    if (matches.items.length === 0) return <div className="home-empty-state">{t.competitionMatchesEmpty}</div>;
+    if (overviewMatches.loading) return <TabSkeleton />;
+    if (overviewMatches.failed) return <RetryState message={t.competitionMatchesLoadError} onRetry={retryOverviewMatches} t={t} />;
+    if (overviewMatches.items.length === 0) return <div className="home-empty-state">{t.competitionMatchesEmpty}</div>;
 
     return (
       <>
@@ -664,9 +714,9 @@ function ActiveCompetitionPage({
   );
 
   const renderMatches = () => {
-    if (matches.loading) return <TabSkeleton />;
-    if (matches.failed) return <RetryState message={t.competitionMatchesLoadError} onRetry={retryMatches} t={t} />;
-    if (matches.items.length === 0) return <div className="home-empty-state">{t.competitionMatchesEmpty}</div>;
+    if (fullMatches.loading) return <TabSkeleton />;
+    if (fullMatches.failed) return <RetryState message={t.competitionMatchesLoadError} onRetry={retryFullMatches} t={t} />;
+    if (fullMatches.items.length === 0) return <div className="home-empty-state">{t.competitionMatchesEmpty}</div>;
 
     return (
       <div className="competition-match-groups">
