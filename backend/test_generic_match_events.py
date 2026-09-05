@@ -356,8 +356,20 @@ class GenericEventRouteTests(unittest.TestCase):
         get_matches.assert_called_once()
         get_events.assert_not_called()
 
-    def test_public_capability_stays_false(self):
-        self.assertIs(get_competition("premier_league")["supports_events"], False)
+    def test_public_capability_is_enabled_only_for_active_generic_competitions(self):
+        active_generic_competitions = (
+            "premier_league",
+            "persian_gulf_pro_league",
+            "la_liga",
+            "serie_a",
+            "bundesliga",
+            "ligue_1",
+            "champions_league",
+            "europa_league",
+        )
+        for competition_key in active_generic_competitions:
+            with self.subTest(competition_key=competition_key):
+                self.assertIs(get_competition(competition_key)["supports_events"], True)
         self.assertIs(get_competition("worldcup2026")["supports_events"], False)
 
     def test_legacy_worldcup_event_route_is_unchanged(self):

@@ -47,6 +47,20 @@ export function fetchCompetitionKnockout(competitionKey, seasonKey, options) {
   return request(`${API_BASE_URL}/competitions/${competition}/seasons/${season}/knockout`, options);
 }
 
+export function fetchCompetitionMatchEvents(competitionKey, seasonKey, matchId, options) {
+  const canonicalMatchId = String(matchId || "");
+  if (!canonicalMatchId.startsWith("mp_match_")) {
+    throw new TypeError("Canonical match ID required");
+  }
+  const competition = encodeURIComponent(competitionKey);
+  const season = encodeURIComponent(seasonKey);
+  const match = encodeURIComponent(canonicalMatchId);
+  return request(
+    `${API_BASE_URL}/competitions/${competition}/seasons/${season}/matches/${match}/events`,
+    options,
+  );
+}
+
 export function fetchMatchEvents(competition, matchId, options) {
   const eventsUrl = competition.supportsScopedEvents
     ? competition.dataUrls.events(matchId)

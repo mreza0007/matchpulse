@@ -1,4 +1,9 @@
 import { getLocalizedTeamName } from "./teams.js";
+import {
+  isFinishedMatch,
+  isLiveMatch,
+  isPastPendingResult,
+} from "./matches.js";
 
 const EVENT_LABELS = {
   fa: {
@@ -12,9 +17,14 @@ const EVENT_LABELS = {
     missed_penalty: "\u067e\u0646\u0627\u0644\u062a\u06cc \u062e\u0631\u0627\u0628\u200c\u0634\u062f\u0647",
     assist: "\u067e\u0627\u0633 \u06af\u0644",
     yellow_card: "\u06a9\u0627\u0631\u062a \u0632\u0631\u062f",
+    second_yellow_red: "\u06a9\u0627\u0631\u062a \u0632\u0631\u062f \u062f\u0648\u0645",
     red_card: "\u06a9\u0627\u0631\u062a \u0642\u0631\u0645\u0632",
     substitution: "\u062a\u0639\u0648\u06cc\u0636",
     var: "VAR",
+    halftime: "\u067e\u0627\u06cc\u0627\u0646 \u0646\u06cc\u0645\u0647 \u0627\u0648\u0644",
+    fulltime: "\u067e\u0627\u06cc\u0627\u0646 \u0628\u0627\u0632\u06cc",
+    kickoff: "\u0634\u0631\u0648\u0639 \u0628\u0627\u0632\u06cc",
+    other: "\u0631\u0648\u06cc\u062f\u0627\u062f",
     unknown: "\u0631\u0648\u06cc\u062f\u0627\u062f",
   },
   en: {
@@ -28,9 +38,14 @@ const EVENT_LABELS = {
     missed_penalty: "Missed penalty",
     assist: "Assist",
     yellow_card: "Yellow card",
+    second_yellow_red: "Second yellow/red card",
     red_card: "Red card",
     substitution: "Substitution",
     var: "VAR",
+    halftime: "Half-time",
+    fulltime: "Full-time",
+    kickoff: "Kick-off",
+    other: "Event",
     unknown: "Event",
   },
 };
@@ -134,9 +149,56 @@ export function getRenderedEventIcon(type) {
     penalty_missed: "\u274c",
     missed_penalty: "\u274c",
     yellow_card: "\ud83d\udfe8",
+    second_yellow_red: "\ud83d\udfe8\ud83d\udfe5",
     red_card: "\ud83d\udfe5",
     substitution: "\ud83d\udd01",
     var: "\ud83c\udfa5",
   }[type] || "\u2022";
 }
 
+function eventIdentityPart(value) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+export function competitionEventIdentity(competition, match) {
+  const competitionKey = eventIdentityPart(competition?.competition_key);
+  const seasonKey = eventIdentityPart(competition?.season_key);
+  const matchId = String(match?.id ?? "").trim();
+  if (!competitionKey || !seasonKey || !matchId.startsWith("mp_match_")) return null;
+  return {
+    competition_key: competitionKey,
+    season_key: seasonKey,
+    match_id: matchId,
+  };
+}
+
+export function competitionEventIdentityKey(identity) {
+  if (!identity) return "";
+  return [
+    eventIdentityPart(identity.competition_key),
+    eventIdentityPart(identity.season_key),
+    String(identity.match_id ?? "").trim(),
+  ].join(":");
+}
+
+export function canShowCompetitionEvents(competition, match) {
+  return Boolean(
+    competition?.supports_events === true
+    && match?.id
+    && (isFinishedMatch(match) || isLiveMatch(match) || isPastPendingResult(match)),
+  );
+}
+
+export function eventRequestFailureKind(status) {
+  if (status === 404 || status === 501) return "unavailable";
+  return "failed";
+}
+
+export function isCurrentEventRequest(activeRequest, identityKey, version) {
+  return Boolean(
+    activeRequest
+    && activeRequest.identityKey === identityKey
+    && activeRequest.version === version
+    && activeRequest.controller?.signal?.aborted !== true
+  );
+}

@@ -234,7 +234,7 @@ export default function MatchCard({
                 <EventRow
                   event={event}
                   index={index}
-                  key={`${event.display_minute || event.raw_minute || event.minute}-${event.type}-${event.player}-${event.team}-${index}`}
+                  key={event.id || `${event.display_minute || event.raw_minute || event.minute}-${event.type}-${event.player_name || event.player}-${event.team_side || event.team}-${index}`}
                   lang={lang}
                   match={match}
                   t={t}

@@ -40,6 +40,19 @@ class CompetitionExpansionRegistryTests(unittest.TestCase):
                     supports_standings,
                 )
                 self.assertIs(competition["supports_predictions"], True)
+                self.assertIs(competition["supports_events"], True)
+
+    def test_worldcup_events_remain_disabled_and_future_entries_default_false(self):
+        worldcup = competition_service.get_competition("worldcup2026")
+        self.assertIs(worldcup["supports_events"], False)
+
+        future = competition_service.validated_competition({
+            "competition_key": "future_competition",
+            "format": "league",
+            "is_active": True,
+            "supports_predictions": False,
+        })
+        self.assertIs(future["supports_events"], False)
 
     def test_required_default_seasons_and_generic_dispatchers_exist(self):
         for competition_key, (season_key, supports_standings) in REQUIRED_SCOPES.items():
@@ -70,6 +83,12 @@ class CompetitionExpansionRouteTests(unittest.TestCase):
             for item in response.json()["competitions"]
         }
         self.assertTrue(REQUIRED_SCOPES.keys() <= keys)
+        by_key = {
+            item["competition_key"]: item
+            for item in response.json()["competitions"]
+        }
+        self.assertTrue(all(by_key[key]["supports_events"] for key in REQUIRED_SCOPES))
+        self.assertIs(by_key["worldcup2026"]["supports_events"], False)
 
     def test_new_domestic_scope_dispatches_matches(self):
         matches = [{"id": "laliga-1"}]

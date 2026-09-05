@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchCompetitionGroups,
   fetchCompetitionKnockout,
+  fetchCompetitionMatchEvents,
   fetchCompetitionStandings,
   fetchCompetitionSeasonMatches,
   fetchCompetitionSeasonTeams,
@@ -30,6 +31,13 @@ import {
   normalizeMatchPayload,
 } from "../utils/matches.js";
 import { getCompetitionName } from "../utils/competitions.js";
+import {
+  canShowCompetitionEvents,
+  competitionEventIdentity,
+  competitionEventIdentityKey,
+  eventRequestFailureKind,
+  isCurrentEventRequest,
+} from "../utils/events.js";
 import ArchivedCompetitionPage from "./ArchivedCompetitionPage.jsx";
 
 const EMPTY_SET = new Set();
@@ -43,6 +51,13 @@ const INITIAL_TEAMS = { items: [], loading: false, loaded: false, failed: false 
 const INITIAL_STANDINGS = { items: [], loading: false, loaded: false, failed: false };
 const INITIAL_GROUPS = { items: [], loading: false, loaded: false, failed: false };
 const INITIAL_KNOCKOUT = { items: [], loading: false, loaded: false, failed: false };
+const EMPTY_EVENT_STATE = {
+  events: [],
+  failed: false,
+  loaded: false,
+  loading: false,
+  unavailable: false,
+};
 
 function TabSkeleton() {
   return (
@@ -74,8 +89,12 @@ function RetryState({ message, onRetry, t }) {
 function DisplayMatchCard({
   canAddReminders,
   competition,
+  eventIdentityKey,
+  eventState,
+  isEventExpanded,
   lang,
   match,
+  onEventToggle,
   onReminderToggle,
   reminderIdentityKeys,
   reminderPendingKeys,
@@ -97,10 +116,16 @@ function DisplayMatchCard({
       homeTeam={match.home_logo ? { logo: match.home_logo } : undefined}
       isReminderActive={Boolean(identityKey && reminderIdentityKeys.has(identityKey))}
       isReminderPending={Boolean(identityKey && reminderPendingKeys.has(identityKey))}
+      events={eventState.events}
+      eventsFailed={eventState.failed}
+      eventsUnavailable={eventState.unavailable}
+      isExpanded={isEventExpanded}
+      isLoadingEvents={eventState.loading}
       lang={lang}
       match={match}
+      onDetailsClick={onEventToggle}
       onReminderToggle={(selectedMatch) => onReminderToggle(competition, selectedMatch)}
-      showEvents={false}
+      showEvents={Boolean(eventIdentityKey && canShowCompetitionEvents(competition, match))}
       showFavorites={false}
       showPredictions={false}
       showReminder={showReminder}
@@ -180,6 +205,18 @@ function ActiveCompetitionPage({
   const [standingsRequested, setStandingsRequested] = useState(isLeague);
   const [groupsRequested, setGroupsRequested] = useState(isGroupKnockout);
   const [knockoutRequested, setKnockoutRequested] = useState(false);
+  const [selectedEventIdentityKey, setSelectedEventIdentityKey] = useState(null);
+  const [eventStatesByIdentity, setEventStatesByIdentity] = useState({});
+  const eventRequestRef = useRef(null);
+  const eventRequestVersionRef = useRef(0);
+
+  useEffect(() => {
+    return () => {
+      eventRequestVersionRef.current += 1;
+      eventRequestRef.current?.controller.abort();
+      eventRequestRef.current = null;
+    };
+  }, [competition.competition_key, competition.season_key]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -366,19 +403,137 @@ function ActiveCompetitionPage({
       .slice(0, 3),
     [matches.items, primaryMatch],
   );
-  const renderDisplayMatchCard = (match, key) => (
-    <DisplayMatchCard
-      canAddReminders={canAddReminders}
-      competition={competition}
-      key={key}
-      lang={lang}
-      match={match}
-      onReminderToggle={onReminderToggle}
-      reminderIdentityKeys={reminderIdentityKeys}
-      reminderPendingKeys={reminderPendingKeys}
-      t={t}
-    />
-  );
+  const toggleMatchEvents = (match) => {
+    const identity = competitionEventIdentity(competition, match);
+    const identityKey = competitionEventIdentityKey(identity);
+    if (!identityKey || !canShowCompetitionEvents(competition, match)) return;
+
+    const activeRequest = eventRequestRef.current;
+    if (selectedEventIdentityKey === identityKey) {
+      if (activeRequest?.identityKey === identityKey) {
+        eventRequestVersionRef.current += 1;
+        activeRequest.controller.abort();
+        eventRequestRef.current = null;
+        setEventStatesByIdentity((current) => ({
+          ...current,
+          [identityKey]: {
+            ...(current[identityKey] || EMPTY_EVENT_STATE),
+            loading: false,
+          },
+        }));
+      }
+      setSelectedEventIdentityKey(null);
+      return;
+    }
+
+    setSelectedEventIdentityKey(identityKey);
+    const cachedState = eventStatesByIdentity[identityKey];
+    if (
+      activeRequest?.identityKey === identityKey
+      && activeRequest.controller.signal.aborted !== true
+    ) return;
+
+    if (activeRequest) {
+      activeRequest.controller.abort();
+      setEventStatesByIdentity((current) => ({
+        ...current,
+        [activeRequest.identityKey]: {
+          ...(current[activeRequest.identityKey] || EMPTY_EVENT_STATE),
+          loading: false,
+        },
+      }));
+    }
+    if (cachedState?.loaded) return;
+
+    const controller = new AbortController();
+    const version = eventRequestVersionRef.current + 1;
+    eventRequestVersionRef.current = version;
+    eventRequestRef.current = { controller, identityKey, version };
+    setEventStatesByIdentity((current) => ({
+      ...current,
+      [identityKey]: {
+        events: current[identityKey]?.events || [],
+        failed: false,
+        loaded: false,
+        loading: true,
+        unavailable: false,
+      },
+    }));
+
+    fetchCompetitionMatchEvents(
+      identity.competition_key,
+      identity.season_key,
+      identity.match_id,
+      { signal: controller.signal },
+    )
+      .then((response) => {
+        if (!response.ok) {
+          const error = new Error("Competition events request failed");
+          error.status = response.status;
+          throw error;
+        }
+        return response.json();
+      })
+      .then((payload) => {
+        if (!isCurrentEventRequest(eventRequestRef.current, identityKey, version)) return;
+        setEventStatesByIdentity((current) => ({
+          ...current,
+          [identityKey]: {
+            events: Array.isArray(payload?.events) ? payload.events : [],
+            failed: false,
+            loaded: true,
+            loading: false,
+            unavailable: false,
+          },
+        }));
+      })
+      .catch((error) => {
+        if (error.name === "AbortError") return;
+        if (!isCurrentEventRequest(eventRequestRef.current, identityKey, version)) return;
+        const failureKind = eventRequestFailureKind(error.status);
+        console.error("Failed to load competition match events", {
+          status: Number(error.status) || 0,
+        });
+        setEventStatesByIdentity((current) => ({
+          ...current,
+          [identityKey]: {
+            events: [],
+            failed: failureKind === "failed",
+            loaded: false,
+            loading: false,
+            unavailable: failureKind === "unavailable",
+          },
+        }));
+      })
+      .finally(() => {
+        if (isCurrentEventRequest(eventRequestRef.current, identityKey, version)) {
+          eventRequestRef.current = null;
+        }
+      });
+  };
+  const renderDisplayMatchCard = (match, key) => {
+    const eventIdentity = competitionEventIdentity(competition, match);
+    const eventIdentityKey = competitionEventIdentityKey(eventIdentity);
+    const eventState = eventStatesByIdentity[eventIdentityKey] || EMPTY_EVENT_STATE;
+
+    return (
+      <DisplayMatchCard
+        canAddReminders={canAddReminders}
+        competition={competition}
+        eventIdentityKey={eventIdentityKey}
+        eventState={eventState}
+        isEventExpanded={selectedEventIdentityKey === eventIdentityKey}
+        key={key}
+        lang={lang}
+        match={match}
+        onEventToggle={toggleMatchEvents}
+        onReminderToggle={onReminderToggle}
+        reminderIdentityKeys={reminderIdentityKeys}
+        reminderPendingKeys={reminderPendingKeys}
+        t={t}
+      />
+    );
+  };
 
 
   const selectTab = (tab) => {
