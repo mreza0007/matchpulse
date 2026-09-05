@@ -60,6 +60,7 @@ import {
 
 const EMPTY_SET = new Set();
 const LEGACY_INLINE_MATCH_ACTIONS_ENABLED = false;
+const LEGACY_MATCH_TABS = new Set(["upcoming", "past"]);
 
 function BrandLogo({ competition, lang }) {
   const [hasError, setHasError] = useState(false);
@@ -143,6 +144,9 @@ function App() {
 
   const t = translations[lang];
   const telegramId = telegramUser?.id;
+  const shouldLoadLegacyMatches = LEGACY_MATCH_TABS.has(activeTab);
+  const shouldLoadLegacyTeams = shouldLoadLegacyMatches;
+  const shouldLoadLegacyWorldCupSummary = activeTab === "worldcup";
   const selectedCompetition = COMPETITIONS[selectedCompetitionKey] || COMPETITIONS.worldcup2026;
   const selectedCompetitionLabel = selectedCompetition.labels[lang] || selectedCompetition.labels.en;
   const heroEyebrow = selectedCompetitionKey === "worldcup2026"
@@ -280,12 +284,15 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (!shouldLoadLegacyWorldCupSummary) return undefined;
+    const controller = new AbortController();
+
     // Existing behavior intentionally resets the archive request state when this effect starts.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoadingWorldcupSummary(true);
     setWorldcupSummaryError("");
 
-    fetchWorldCupSummary()
+    fetchWorldCupSummary({ signal: controller.signal })
       .then((response) => {
         if (!response.ok) throw new Error(`World Cup summary request failed: ${response.status}`);
         return response.json();
@@ -295,13 +302,19 @@ function App() {
         setWorldcupSummaryError("");
       })
       .catch((error) => {
+        if (error.name === "AbortError") return;
         console.error("Failed to load World Cup summary:", error);
         setWorldcupSummaryError(t.worldcupArchiveError);
       })
-      .finally(() => setIsLoadingWorldcupSummary(false));
-  }, [t.worldcupArchiveError]);
+      .finally(() => {
+        if (!controller.signal.aborted) setIsLoadingWorldcupSummary(false);
+      });
+
+    return () => controller.abort();
+  }, [shouldLoadLegacyWorldCupSummary, t.worldcupArchiveError]);
 
   useEffect(() => {
+    if (!shouldLoadLegacyMatches) return undefined;
     const scoreTimeouts = scoreChangeTimeouts.current;
     const requestController = new AbortController();
 
@@ -398,9 +411,10 @@ function App() {
       scoreTimeouts.forEach((timeout) => window.clearTimeout(timeout));
       scoreTimeouts.clear();
     };
-  }, [selectedCompetition, t.matchesError]);
+  }, [selectedCompetition, shouldLoadLegacyMatches, t.matchesError]);
 
   useEffect(() => {
+    if (!shouldLoadLegacyTeams) return undefined;
     const requestController = new AbortController();
 
     fetchCompetitionTeams(selectedCompetition, { signal: requestController.signal })
@@ -414,7 +428,7 @@ function App() {
       });
 
     return () => requestController.abort();
-  }, [selectedCompetition]);
+  }, [selectedCompetition, shouldLoadLegacyTeams]);
 
   useEffect(() => () => {
     eventRequestController.current?.abort();
@@ -472,19 +486,6 @@ function App() {
       })
       .catch((error) => console.error("Failed to load predictions:", error));
 
-    fetchPredictionStats(telegramId)
-      .then((response) => {
-        if (!response.ok) throw new Error(`Prediction stats request failed: ${response.status}`);
-        return response.json();
-      })
-      .then((data) => setPredictionStats({
-        points: Number(data.points) || 0,
-        correct: Number(data.correct) || 0,
-        wrong: Number(data.wrong) || 0,
-        pending: Number(data.pending) || 0,
-        total: Number(data.total) || 0,
-      }))
-      .catch((error) => console.error("Failed to load prediction stats:", error));
   }, [telegramId, telegramUser]);
 
   useEffect(() => {
