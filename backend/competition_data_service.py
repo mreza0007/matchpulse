@@ -263,9 +263,21 @@ def get_match_live_for_season(competition_key, season_key, match_id):
     return season_provider["live"](match_id)
 
 
+def has_match_events_source_for_season(competition_key, season_key):
+    season_provider = get_season_provider(competition_key, season_key)
+    return bool(season_provider and season_provider.get("events"))
+
+
 def get_match_events_for_season(competition_key, season_key, match_id):
     season_provider = get_season_provider(competition_key, season_key)
     if not season_provider or not season_provider.get("events"):
         return None
 
-    return season_provider["events"](match_id)
+    try:
+        return season_provider["events"](
+            match_id,
+            competition_key=competition_key,
+            season_key=season_key,
+        )
+    except GenericFootballProviderError as error:
+        raise CompetitionDataProviderError() from error

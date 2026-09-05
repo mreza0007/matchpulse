@@ -43,7 +43,11 @@ class RegistryAndDispatcherTests(unittest.TestCase):
             )
 
         live.assert_called_once_with("mp_match_live")
-        events.assert_called_once_with("mp_match_events")
+        events.assert_called_once_with(
+            "mp_match_events",
+            competition_key="premier_league",
+            season_key="2026-2027",
+        )
 
     def test_unknown_competition_and_season_return_none(self):
         self.assertIsNone(competition_data_service.get_matches_for_season("unknown", "2026"))
@@ -126,31 +130,34 @@ class GenericNormalizationTests(unittest.TestCase):
 
 class AdapterHttpTests(unittest.TestCase):
     @patch("services.generic_football_adapter.fetch_json")
-    def test_match_events_preserves_count_and_stale(self, fetch_json):
+    def test_match_events_derives_normalized_count_and_preserves_stale(self, fetch_json):
         fetch_json.return_value = {
             "ok": True,
             "match_id": "mp_match_1",
             "count": 7,
             "stale": True,
-            "events": [{"id": "event-1"}],
+            "events": [{"id": "mp_event_1", "type": "goal", "minute": 7}],
         }
 
         result = generic_football_adapter.get_match_events("mp_match_1")
 
-        self.assertEqual(result["count"], 7)
+        self.assertEqual(result["count"], 1)
         self.assertIs(result["stale"], True)
-        self.assertEqual(result["events"], [{"id": "event-1"}])
+        self.assertEqual(result["events"][0]["id"], "mp_event_1")
+        self.assertEqual(result["events"][0]["type"], "goal")
+        self.assertEqual(result["events"][0]["display_minute"], "7")
 
     @patch("services.generic_football_adapter.fetch_json")
-    def test_match_events_derives_missing_count_without_inventing_stale(self, fetch_json):
+    def test_match_events_derives_missing_count_and_defaults_stale_false(self, fetch_json):
         fetch_json.return_value = {
             "events": [{"id": "event-1"}, {"id": "event-2"}],
+            "match_id": "mp_match_1",
         }
 
         result = generic_football_adapter.get_match_events("mp_match_1")
 
         self.assertEqual(result["count"], 2)
-        self.assertIsNone(result["stale"])
+        self.assertIs(result["stale"], False)
 
     @patch("services.generic_football_adapter.requests.get")
     def test_season_matches_uses_generic_wrapper_and_normalizes(self, get):
@@ -171,11 +178,12 @@ class AdapterHttpTests(unittest.TestCase):
         ))
 
     @patch("services.generic_football_adapter.requests.get")
-    def test_match_provider_failure_is_explicit_while_events_remain_safe(self, get):
+    def test_match_and_event_provider_failures_are_explicit(self, get):
         get.side_effect = generic_football_adapter.requests.RequestException("unavailable")
         with self.assertRaises(generic_football_adapter.GenericFootballProviderError):
             generic_football_adapter.get_season_matches("premier_league", "2026-2027")
-        self.assertEqual(generic_football_adapter.get_match_events("mp_match_1")["events"], [])
+        with self.assertRaises(generic_football_adapter.GenericFootballProviderError):
+            generic_football_adapter.get_match_events("mp_match_1")
 
 
 class RouteCompatibilityTests(unittest.TestCase):
@@ -223,8 +231,27 @@ class ScopedRouteTestClientTests(unittest.TestCase):
         live.assert_called_once_with("premier_league", "2026-2027", "mp_match_live")
 
     def test_premier_league_events_route_passes_string_id(self):
-        payload = {"ok": True, "match_id": "mp_match_events", "events": []}
-        with patch("main.get_match_events_for_season", return_value=payload) as events:
+        payload = {
+            "competition_key": "premier_league",
+            "season_key": "2026-2027",
+            "match_id": "mp_match_events",
+            "count": 0,
+            "stale": False,
+            "warnings": [],
+            "events": [],
+        }
+        with (
+            patch("main.has_match_events_source_for_season", return_value=True),
+            patch(
+                "main.get_match_for_season",
+                return_value={
+                    "id": "mp_match_events",
+                    "competition_key": "premier_league",
+                    "season_key": "2026-2027",
+                },
+            ),
+            patch("main.get_match_events_for_season", return_value=payload) as events,
+        ):
             response = self.client.get(
                 "/competitions/premier_league/seasons/2026-2027/matches/mp_match_events/events"
             )

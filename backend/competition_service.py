@@ -198,6 +198,7 @@ def validated_competition(competition):
     validated = competition.copy()
     validated.setdefault("supports_favorites", validated.get("is_active") is True)
     validated.setdefault("supports_reminders", False)
+    validated.setdefault("supports_events", False)
     validated.setdefault("supports_prediction_history", validated.get("supports_predictions") is True)
     return validated
 

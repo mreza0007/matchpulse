@@ -20,6 +20,7 @@ from competition_data_service import (
     get_match_for_season,
     get_prediction_matches_for_season,
     get_match_events_for_season,
+    has_match_events_source_for_season,
     get_groups_for_season,
     get_knockout_for_season,
     get_match_live_for_season,
@@ -413,10 +414,47 @@ def get_competition_season_match_events(competition_key: str, season_key: str, m
     if not season:
         raise HTTPException(status_code=404, detail="Season not found")
 
-    events = get_match_events_for_season(competition_key, season_key, match_id)
-    if events is None:
+    canonical_competition_key = competition["competition_key"]
+    canonical_season_key = season["season_key"]
+    if not has_match_events_source_for_season(canonical_competition_key, canonical_season_key):
         raise HTTPException(status_code=501, detail="Competition season events data source not configured")
 
+    if not str(match_id).startswith("mp_match_"):
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    try:
+        match = get_match_for_season(canonical_competition_key, canonical_season_key, match_id)
+    except CompetitionDataProviderError as error:
+        raise HTTPException(status_code=502, detail="Events provider unavailable") from error
+    if (
+        not match
+        or str(match.get("id") or "") != str(match_id)
+        or str(match.get("competition_key") or "").strip().lower()
+        != canonical_competition_key.lower()
+        or str(match.get("season_key") or "").strip().lower()
+        != canonical_season_key.lower()
+    ):
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    try:
+        events = get_match_events_for_season(
+            canonical_competition_key,
+            canonical_season_key,
+            match_id,
+        )
+    except CompetitionDataProviderError as error:
+        raise HTTPException(status_code=502, detail="Events provider unavailable") from error
+    if events is None:
+        raise HTTPException(status_code=501, detail="Competition season events data source not configured")
+    if (
+        not isinstance(events, dict)
+        or str(events.get("competition_key") or "").strip().lower()
+        != canonical_competition_key.lower()
+        or str(events.get("season_key") or "").strip().lower()
+        != canonical_season_key.lower()
+        or str(events.get("match_id") or "") != str(match_id)
+    ):
+        raise HTTPException(status_code=502, detail="Events provider unavailable")
     return events
 
 

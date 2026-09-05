@@ -285,26 +285,228 @@ def get_match_live(match_id):
     return {"ok": bool(normalized), "match": normalized}
 
 
-def get_match_events(match_id):
-    stable_match_id = quote(str(match_id), safe="")
-    payload = fetch_json(f"/matches/{stable_match_id}/events")
-    if not isinstance(payload, dict):
-        return {"ok": False, "match_id": str(match_id), "events": []}
+EVENT_TYPES = frozenset({
+    "goal",
+    "own_goal",
+    "penalty_goal",
+    "missed_penalty",
+    "yellow_card",
+    "second_yellow_red",
+    "red_card",
+    "substitution",
+    "var",
+    "disallowed_goal",
+    "halftime",
+    "fulltime",
+    "kickoff",
+    "other",
+})
 
-    events = list(payload.get("events")) if isinstance(payload.get("events"), list) else []
-    count = payload.get("count")
-    if count is None:
-        count = len(events)
+EVENT_TYPE_ALIASES = {
+    "own-goal": "own_goal",
+    "own goal": "own_goal",
+    "penalty-goal": "penalty_goal",
+    "penalty goal": "penalty_goal",
+    "penalty_missed": "missed_penalty",
+    "missed-penalty": "missed_penalty",
+    "missed penalty": "missed_penalty",
+    "yellow": "yellow_card",
+    "yellow-card": "yellow_card",
+    "yellow card": "yellow_card",
+    "second_yellow": "second_yellow_red",
+    "second-yellow-red": "second_yellow_red",
+    "second yellow red": "second_yellow_red",
+    "red": "red_card",
+    "red-card": "red_card",
+    "red card": "red_card",
+    "sub": "substitution",
+    "video_assistant_referee": "var",
+    "goal_disallowed": "disallowed_goal",
+    "goal-disallowed": "disallowed_goal",
+    "goal disallowed": "disallowed_goal",
+    "disallowed-goal": "disallowed_goal",
+    "disallowed goal": "disallowed_goal",
+    "half_time": "halftime",
+    "half-time": "halftime",
+    "half time": "halftime",
+    "full_time": "fulltime",
+    "full-time": "fulltime",
+    "full time": "fulltime",
+    "kick_off": "kickoff",
+    "kick-off": "kickoff",
+    "kick off": "kickoff",
+}
+
+GOAL_EVENT_TYPES = frozenset({"goal", "own_goal", "penalty_goal"})
+
+
+def _event_text(value):
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _event_int(value):
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number >= 0 else None
+
+
+def _first_event_text(event, *fields):
+    for field in fields:
+        value = _event_text(event.get(field))
+        if value is not None:
+            return value
+    return None
+
+
+def _event_minute_parts(event):
+    minute = _event_int(event.get("minute"))
+    added_time = _event_int(event.get("added_time"))
+    raw_display_minute = _first_event_text(event, "display_minute")
+
+    minute_source = raw_display_minute or _first_event_text(event, "minute")
+    if minute_source:
+        match = re.fullmatch(r"\s*(\d+)\s*(?:\+\s*(\d+))?\s*'?\s*", minute_source)
+        if match:
+            if minute is None:
+                minute = int(match.group(1))
+            if added_time is None:
+                added_time = int(match.group(2) or 0)
+
+    if minute is not None and added_time is None:
+        added_time = 0
+    display_minute = None
+    if minute is not None:
+        display_minute = f"{minute}+{added_time}" if added_time else str(minute)
+
+    return minute, added_time, display_minute
+
+
+def _normalize_event_type(event):
+    raw_type = _first_event_text(event, "type", "normalized_type", "event_type")
+    normalized = str(raw_type or "").strip().lower()
+    normalized = EVENT_TYPE_ALIASES.get(normalized, normalized)
+    if normalized == "var":
+        evidence = " ".join(
+            value.lower()
+            for value in (
+                _first_event_text(event, "raw_type_label"),
+                _first_event_text(event, "description"),
+            )
+            if value
+        )
+        if "goal disallowed" in evidence or "disallowed goal" in evidence:
+            return "disallowed_goal"
+    return normalized if normalized in EVENT_TYPES else "other"
+
+
+def _canonical_public_id(value, prefix):
+    normalized = _event_text(value)
+    if normalized and normalized.startswith(prefix):
+        return normalized
+    return None
+
+
+def normalize_match_event(event, original_index=0):
+    if not isinstance(event, dict):
+        return None
+
+    event_type = _normalize_event_type(event)
+    minute, added_time, display_minute = _event_minute_parts(event)
+    secondary_player_name = _first_event_text(
+        event, "secondary_player_name", "secondary_player_name_fa"
+    )
+    assist_name = _first_event_text(event, "assist_name", "assist_name_fa")
+    if assist_name is None and event_type in GOAL_EVENT_TYPES:
+        assist_name = secondary_player_name
+
+    team_side = _first_event_text(event, "team_side")
+    if team_side not in {"home", "away"}:
+        team_side = None
+
+    normalized = {
+        "id": _canonical_public_id(event.get("id"), "mp_event_"),
+        "type": event_type,
+        "minute": minute,
+        "added_time": added_time,
+        "display_minute": display_minute,
+        "team_side": team_side,
+        "team_id": _canonical_public_id(event.get("team_id"), "mp_team_"),
+        "player_name": _first_event_text(event, "player_name", "player_name_fa"),
+        "secondary_player_name": secondary_player_name,
+        "assist_name": assist_name,
+        "player_in_name": _first_event_text(event, "player_in_name", "player_in_name_fa"),
+        "player_out_name": _first_event_text(event, "player_out_name", "player_out_name_fa"),
+        "home_score": _event_int(event.get("home_score")),
+        "away_score": _event_int(event.get("away_score")),
+        "description": _first_event_text(event, "description"),
+        "raw_type_label": _first_event_text(event, "raw_type_label"),
+    }
+    return normalized, original_index
+
+
+def _event_sort_key(item):
+    event, original_index = item
+    minute = event.get("minute")
+    added_time = event.get("added_time")
+    return (
+        minute is None,
+        minute if minute is not None else 0,
+        added_time if added_time is not None else 0,
+        original_index,
+    )
+
+
+def _normalized_scope_value(value):
+    return str(value or "").strip().lower()
+
+
+def get_match_events(match_id, *, competition_key=None, season_key=None):
+    stable_match_id = quote(str(match_id), safe="")
+    payload = fetch_json(f"/matches/{stable_match_id}/events", required=True)
+    if not isinstance(payload, dict):
+        raise GenericFootballProviderError("Invalid events payload")
+
+    requested_match_id = str(match_id)
+    if payload.get("ok") is False or str(payload.get("match_id") or "") != requested_match_id:
+        raise GenericFootballProviderError("Invalid events payload")
+
+    for field, requested_value in (
+        ("competition_key", competition_key),
+        ("season_key", season_key),
+    ):
+        returned_value = payload.get(field)
+        if returned_value is not None and requested_value is not None and (
+            _normalized_scope_value(returned_value) != _normalized_scope_value(requested_value)
+        ):
+            raise GenericFootballProviderError("Invalid events payload")
+
+    raw_events = payload.get("events")
+    if not isinstance(raw_events, list):
+        raise GenericFootballProviderError("Invalid events payload")
+    normalized_events = []
+    for index, event in enumerate(raw_events):
+        normalized = normalize_match_event(event, original_index=index)
+        if normalized is not None:
+            normalized_events.append(normalized)
+    normalized_events.sort(key=_event_sort_key)
+    events = [event for event, _ in normalized_events]
+
+    stale = payload.get("stale") is True
+    warnings = ["stale_events"] if stale else []
 
     return {
-        "ok": payload.get("ok", True),
-        "match_id": payload.get("match_id", str(match_id)),
-        "competition_key": payload.get("competition_key"),
-        "season_key": payload.get("season_key"),
-        "provider": payload.get("provider"),
-        "external_match_id": payload.get("external_match_id"),
-        "count": count,
-        "stale": payload.get("stale"),
+        "competition_key": str(competition_key or payload.get("competition_key") or ""),
+        "season_key": str(season_key or payload.get("season_key") or ""),
+        "match_id": requested_match_id,
+        "count": len(events),
+        "stale": stale,
+        "warnings": warnings,
         "events": events,
-        "warnings": normalize_warnings(payload.get("warnings")),
     }
