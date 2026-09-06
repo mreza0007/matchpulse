@@ -233,6 +233,46 @@ def get_season_matches(competition_key, season_key, status="all", competition_fo
     return matches
 
 
+def get_season_overview(competition_key, season_key, competition_format=None):
+    competition_value = str(competition_key)
+    season_value = str(season_key)
+    competition = quote(competition_value, safe="")
+    season = quote(season_value, safe="")
+    payload = fetch_json(
+        f"/competitions/{competition}/seasons/{season}/overview", required=True
+    )
+    if not isinstance(payload, dict):
+        raise GenericFootballProviderError("Invalid overview payload")
+    if (
+        str(payload.get("competition_key") or "") != competition_value
+        or str(payload.get("season_key") or "") != season_value
+    ):
+        raise GenericFootballProviderError("Invalid overview scope")
+
+    raw_matches = payload.get("matches")
+    if not isinstance(raw_matches, list):
+        raise GenericFootballProviderError("Invalid overview payload")
+
+    matches = []
+    for match in raw_matches:
+        if not isinstance(match, dict):
+            raise GenericFootballProviderError("Invalid overview payload")
+        normalized = normalize_match(match, competition_format=competition_format)
+        if normalized is not None:
+            match_id = normalized.get("id")
+            if not isinstance(match_id, str) or not match_id.startswith("mp_match_"):
+                raise GenericFootballProviderError("Invalid overview payload")
+            if (
+                str(normalized.get("competition_key") or "") != competition_value
+                or str(normalized.get("season_key") or "") != season_value
+            ):
+                raise GenericFootballProviderError("Invalid overview scope")
+            normalized.pop("provider", None)
+            normalized.pop("external_match_id", None)
+            matches.append(normalized)
+    return matches
+
+
 def get_season_teams(competition_key, season_key):
     competition = quote(str(competition_key), safe="")
     season = quote(str(season_key), safe="")

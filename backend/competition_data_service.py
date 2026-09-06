@@ -1,6 +1,5 @@
 from functools import partial
 
-from competition_overview_service import select_overview_matches
 from competition_service import get_competition
 from real_data_service import get_real_matches, get_real_teams, get_worldcup_knockout_rounds
 from season_service import get_default_season
@@ -15,6 +14,7 @@ from services.generic_football_adapter import (
     GenericStandingsUnavailableError,
     get_match_events as get_generic_match_events,
     get_match_live as get_generic_match_live,
+    get_season_overview as get_generic_season_overview,
     get_season_matches as get_generic_season_matches,
     get_season_standings as get_generic_season_standings,
     get_season_teams as get_generic_season_teams,
@@ -69,6 +69,12 @@ COMPETITION_DATA_PROVIDERS = {
                     "2026-2027",
                     competition_format="league",
                 ),
+                "overview": partial(
+                    get_generic_season_overview,
+                    "premier_league",
+                    "2026-2027",
+                    competition_format="league",
+                ),
                 "standings": partial(get_generic_season_standings, "premier_league", "2026-2027"),
                 "teams": partial(get_generic_season_teams, "premier_league", "2026-2027"),
                 "live": get_generic_match_live,
@@ -82,6 +88,12 @@ def generic_football_provider(competition_key, season_key, supports_standings=Tr
     season_provider = {
         "matches": partial(
             get_generic_season_matches,
+            competition_key,
+            season_key,
+            competition_format="league",
+        ),
+        "overview": partial(
+            get_generic_season_overview,
             competition_key,
             season_key,
             competition_format="league",
@@ -285,7 +297,11 @@ def get_match_events_for_season(competition_key, season_key, match_id):
 
 
 def get_overview_matches_for_season(competition_key, season_key):
-    matches = get_matches_for_season(competition_key, season_key, status="all")
-    if matches is None:
+    season_provider = get_season_provider(competition_key, season_key)
+    if not season_provider or not season_provider.get("overview"):
         return None
-    return select_overview_matches(matches)
+
+    try:
+        return season_provider["overview"]()
+    except GenericFootballProviderError as error:
+        raise CompetitionDataProviderError() from error

@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from fastapi.testclient import TestClient
 
@@ -7,6 +7,7 @@ import competition_data_service
 import main
 from competition_data_service import CompetitionDataProviderError
 from competition_overview_service import select_overview_matches
+from services import generic_football_adapter
 
 
 def match(match_id, status, kickoff_utc, **overrides):
@@ -65,22 +66,204 @@ class CompetitionOverviewSelectionTests(unittest.TestCase):
             ["live-known", "live-unknown"],
         )
 
-    def test_data_service_uses_one_authoritative_season_fetch(self):
+    def test_data_service_uses_one_authoritative_bounded_fetch(self):
         matches = [match("next", "upcoming", "2026-09-01T12:00:00Z")]
-        with patch(
-            "competition_data_service.get_matches_for_season",
-            return_value=matches,
-        ) as get_matches:
+        overview = Mock(return_value=matches)
+        season_provider = competition_data_service.get_season_provider(
+            "premier_league", "2026-2027"
+        )
+        with patch.dict(season_provider, {"overview": overview}):
             selected = competition_data_service.get_overview_matches_for_season(
                 "premier_league",
                 "2026-2027",
             )
 
         self.assertEqual(selected, matches)
-        get_matches.assert_called_once_with(
-            "premier_league",
-            "2026-2027",
-            status="all",
+        overview.assert_called_once_with()
+
+    @patch("services.generic_football_adapter.requests.get")
+    def test_bounded_adapter_calls_overview_once_and_preserves_canonical_ids(self, get):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "ok": True,
+            "competition_key": "premier_league",
+            "season_key": "2026-2027",
+            "count": 1,
+            "stale": True,
+            "warnings": ["private-warning"],
+            "provider": "private-provider",
+            "matches": [
+                {
+                    **match("mp_match_canonical", "upcoming", "2026-09-01T12:00:00Z"),
+                    "provider": "varzesh3",
+                    "external_match_id": "private-123",
+                    "private_wrapper_field": "secret",
+                }
+            ],
+        }
+        get.return_value = response
+
+        matches = generic_football_adapter.get_season_overview(
+            "premier_league", "2026-2027", competition_format="league"
+        )
+
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["id"], "mp_match_canonical")
+        self.assertNotIn("provider", matches[0])
+        self.assertNotIn("external_match_id", matches[0])
+        self.assertNotIn("private_wrapper_field", matches[0])
+        get.assert_called_once()
+        self.assertTrue(
+            get.call_args.args[0].endswith(
+                "/competitions/premier_league/seasons/2026-2027/overview"
+            )
+        )
+
+    @patch("services.generic_football_adapter.requests.get")
+    def test_bounded_adapter_rejects_scope_mismatch(self, get):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "competition_key": "la_liga",
+            "season_key": "2026-2027",
+            "matches": [],
+        }
+        get.return_value = response
+
+        with self.assertRaises(generic_football_adapter.GenericFootballProviderError):
+            generic_football_adapter.get_season_overview(
+                "premier_league", "2026-2027"
+            )
+
+    @patch("services.generic_football_adapter.requests.get")
+    def test_bounded_adapter_rejects_cross_season_envelope(self, get):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "competition_key": "premier_league",
+            "season_key": "2025-2026",
+            "matches": [],
+        }
+        get.return_value = response
+
+        with self.assertRaises(generic_football_adapter.GenericFootballProviderError):
+            generic_football_adapter.get_season_overview(
+                "premier_league", "2026-2027"
+            )
+
+    @patch("services.generic_football_adapter.requests.get")
+    def test_bounded_adapter_rejects_malformed_match_rows(self, get):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "competition_key": "premier_league",
+            "season_key": "2026-2027",
+            "matches": ["not-a-match"],
+        }
+        get.return_value = response
+
+        with self.assertRaises(generic_football_adapter.GenericFootballProviderError):
+            generic_football_adapter.get_season_overview(
+                "premier_league", "2026-2027"
+            )
+
+    @patch("services.generic_football_adapter.requests.get")
+    def test_bounded_adapter_accepts_empty_overview(self, get):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "competition_key": "premier_league",
+            "season_key": "2026-2027",
+            "matches": [],
+        }
+        get.return_value = response
+
+        self.assertEqual(
+            generic_football_adapter.get_season_overview(
+                "premier_league", "2026-2027"
+            ),
+            [],
+        )
+
+    @patch("services.generic_football_adapter.requests.get")
+    def test_bounded_adapter_rejects_match_scope_mismatch(self, get):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "competition_key": "premier_league",
+            "season_key": "2026-2027",
+            "matches": [
+                {
+                    **match("mp_match_wrong_scope", "upcoming", "2026-09-01T12:00:00Z"),
+                    "competition_key": "la_liga",
+                }
+            ],
+        }
+        get.return_value = response
+
+        with self.assertRaises(generic_football_adapter.GenericFootballProviderError):
+            generic_football_adapter.get_season_overview(
+                "premier_league", "2026-2027"
+            )
+
+    @patch("services.generic_football_adapter.requests.get")
+    def test_bounded_adapter_rejects_cross_season_match(self, get):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "competition_key": "premier_league",
+            "season_key": "2026-2027",
+            "matches": [
+                {
+                    **match("mp_match_wrong_season", "upcoming", "2026-09-01T12:00:00Z"),
+                    "season_key": "2025-2026",
+                }
+            ],
+        }
+        get.return_value = response
+
+        with self.assertRaises(generic_football_adapter.GenericFootballProviderError):
+            generic_football_adapter.get_season_overview(
+                "premier_league", "2026-2027"
+            )
+
+    @patch("services.generic_football_adapter.requests.get")
+    def test_bounded_adapter_rejects_noncanonical_match_id(self, get):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "competition_key": "premier_league",
+            "season_key": "2026-2027",
+            "matches": [
+                match("480301", "upcoming", "2026-09-01T12:00:00Z")
+            ],
+        }
+        get.return_value = response
+
+        with self.assertRaises(generic_football_adapter.GenericFootballProviderError):
+            generic_football_adapter.get_season_overview(
+                "premier_league", "2026-2027"
+            )
+
+    @patch("services.generic_football_adapter.requests.get")
+    def test_full_season_adapter_still_calls_matches(self, get):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {"matches": []}
+        get.return_value = response
+
+        self.assertEqual(
+            generic_football_adapter.get_season_matches(
+                "premier_league", "2026-2027"
+            ),
+            [],
+        )
+        get.assert_called_once()
+        self.assertTrue(
+            get.call_args.args[0].endswith(
+                "/competitions/premier_league/seasons/2026-2027/matches"
+            )
         )
 
 
@@ -147,6 +330,26 @@ class CompetitionOverviewRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.json(), {"detail": "Matches provider unavailable"})
         self.assertNotIn("private wrapper detail", response.text)
+
+    @patch("services.generic_football_adapter.requests.get")
+    def test_wrapper_scope_mismatch_is_a_sanitized_502(self, get):
+        wrapper_response = Mock()
+        wrapper_response.raise_for_status.return_value = None
+        wrapper_response.json.return_value = {
+            "competition_key": "la_liga",
+            "season_key": "2026-2027",
+            "matches": [],
+        }
+        get.return_value = wrapper_response
+
+        response = self.client.get(
+            "/competitions/premier_league/seasons/2026-2027/overview"
+        )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json(), {"detail": "Matches provider unavailable"})
+        self.assertNotIn("la_liga", response.text)
+        self.assertNotIn("Invalid overview scope", response.text)
 
 
 if __name__ == "__main__":
