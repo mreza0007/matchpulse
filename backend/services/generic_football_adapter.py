@@ -215,6 +215,18 @@ def status_matches_filter(requested_status, match_status):
     return requested == "all" or requested == match_status
 
 
+def get_daily_matches(date):
+    payload = fetch_json(f"/matches/by-date?date={quote(date, safe='')}", required=True)
+    if (
+        not isinstance(payload, dict)
+        or payload.get("date") != date
+        or not isinstance(payload.get("groups"), list)
+        or not isinstance(payload.get("errors"), list)
+    ):
+        raise GenericFootballProviderError("Invalid daily matches payload")
+    return payload
+
+
 def get_season_matches(competition_key, season_key, status="all", competition_format=None):
     competition = quote(str(competition_key), safe="")
     season = quote(str(season_key), safe="")

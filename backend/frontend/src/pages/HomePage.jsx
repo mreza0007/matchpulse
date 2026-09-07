@@ -1,22 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
-import { fetchMatchesByDate } from "../api/football.js";
+import { useMemo } from "react";
+import { useDailyMatches, useTehranCalendarDates } from "../hooks/useDailyMatches.js";
 import CompetitionMatchGroup from "../components/competitions/CompetitionMatchGroup.jsx";
 import HeroMatchCard from "../components/matches/HeroMatchCard.jsx";
 import MatchCard from "../components/matches/MatchCard.jsx";
-import { formatTehranMatchDateTime, getTehranCalendarDates } from "../utils/dates.js";
+import { formatTehranMatchDateTime } from "../utils/dates.js";
 import { isLiveMatch } from "../utils/matches.js";
 
 const EMPTY_SET = new Set();
-const INITIAL_DATE_STATE = { groups: [], errors: [], failed: false, loading: true };
-
-function normalizeDatePayload(payload) {
-  return {
-    groups: Array.isArray(payload?.groups) ? payload.groups : [],
-    errors: Array.isArray(payload?.errors) ? payload.errors : [],
-    failed: false,
-    loading: false,
-  };
-}
 
 function firstMatch(groups) {
   for (const group of groups) {
@@ -64,31 +54,9 @@ function DateMatchSection({ label, groups, lang, renderMatch }) {
 }
 
 export default function HomePage({ lang, t }) {
-  const [dates] = useState(() => getTehranCalendarDates());
-  const [today, setToday] = useState(INITIAL_DATE_STATE);
-  const [tomorrow, setTomorrow] = useState(INITIAL_DATE_STATE);
-
-  useEffect(() => {
-    const controller = new AbortController();
-
-    const loadDate = (date, setter) => {
-      fetchMatchesByDate(date, { signal: controller.signal })
-        .then((response) => {
-          if (!response.ok) throw new Error(`Aggregate matches request failed: ${response.status}`);
-          return response.json();
-        })
-        .then((payload) => setter(normalizeDatePayload(payload)))
-        .catch((error) => {
-          if (error.name === "AbortError") return;
-          console.error("Failed to load aggregate matches:", error);
-          setter({ groups: [], errors: [], failed: true, loading: false });
-        });
-    };
-
-    loadDate(dates.today, setToday);
-    loadDate(dates.tomorrow, setTomorrow);
-    return () => controller.abort();
-  }, [dates]);
+  const dates = useTehranCalendarDates();
+  const today = useDailyMatches(dates.today);
+  const tomorrow = useDailyMatches(dates.tomorrow);
 
   const todayMatches = useMemo(
     () => today.groups.flatMap((group) => Array.isArray(group.matches) ? group.matches : []),
@@ -128,13 +96,13 @@ export default function HomePage({ lang, t }) {
         </section>
       )}
 
-      {today.loading ? (
+      {today.loading && !today.hasPayload ? (
         <HomeSkeleton label={t.today} />
       ) : (
         <DateMatchSection groups={today.groups} label={t.today} lang={lang} renderMatch={renderMatch} />
       )}
 
-      {tomorrow.loading ? (
+      {tomorrow.loading && !tomorrow.hasPayload ? (
         <HomeSkeleton label={t.tomorrow} />
       ) : (
         <DateMatchSection groups={tomorrow.groups} label={t.tomorrow} lang={lang} renderMatch={renderMatch} />

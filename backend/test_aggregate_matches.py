@@ -1,139 +1,36 @@
+import copy
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+import requests
 from fastapi.testclient import TestClient
 
-import aggregate_match_service
 import main
+from services import generic_football_adapter as adapter
 
 
-COMPETITIONS = [
-    {
-        "competition_key": "worldcup2026",
-        "name_en": "World Cup 2026",
-        "name_fa": "جام جهانی ۲۰۲۶",
-        "type": "international",
-        "is_active": True,
-        "supports_matches": True,
-    },
-    {
-        "competition_key": "premier_league",
-        "name_en": "Premier League",
-        "name_fa": "لیگ برتر انگلیس",
-        "type": "club",
-        "is_active": True,
-        "supports_matches": True,
-    },
-]
-
-SEASONS = {
-    "worldcup2026": {"competition_key": "worldcup2026", "season_key": "2026"},
-    "premier_league": {"competition_key": "premier_league", "season_key": "2026-2027"},
-}
+DATE = "2026-09-07"
 
 
-class AggregateMatchServiceTests(unittest.TestCase):
-    def aggregate(self, matches_by_competition, competitions=None):
-        def get_matches(competition_key, season_key, status="all"):
-            self.assertEqual(status, "all")
-            self.assertEqual(season_key, SEASONS[competition_key]["season_key"])
-            value = matches_by_competition[competition_key]
-            if isinstance(value, Exception):
-                raise value
-            return value
+def daily_group(key="premier_league", season="2026-2027"):
+    return {
+        "competition": {"key": key, "season_key": season, "name": "Premier League"},
+        "matches": [{
+            "id": "mp_match_daily", "competition_key": key, "season_key": season,
+            "home_team_id": "mp_team_home", "away_team_id": "mp_team_away",
+            "home_name_en": "Home", "away_name_en": "Away",
+            "home_name_fa": "خانه", "away_name_fa": "مهمان",
+            "kickoff_utc": "2026-09-06T21:00:00Z", "status": "live",
+            "home_score": 1, "away_score": 0,
+            "provider": "private", "external_match_id": "private-id",
+            "warnings": ["kickoff_time_resolved_from_local_fields"],
+            "private_extra": "secret",
+        }],
+    }
 
-        with (
-            patch.object(aggregate_match_service, "get_competitions", return_value=competitions or COMPETITIONS),
-            patch.object(aggregate_match_service, "get_default_season", side_effect=lambda key: SEASONS.get(key)),
-            patch.object(aggregate_match_service, "get_matches_for_season", side_effect=get_matches),
-        ):
-            return aggregate_match_service.aggregate_matches_by_date("2026-08-16")
 
-    def test_valid_date_aggregates_multiple_competitions(self):
-        result = self.aggregate({
-            "worldcup2026": [{"id": 1, "date_key": "2026-08-16", "time_iran": "20:00"}],
-            "premier_league": [{"id": "pl-1", "kickoff_utc": "2026-08-15T21:00:00Z"}],
-        })
-
-        self.assertEqual(result["date"], "2026-08-16")
-        self.assertEqual([group["competition"]["key"] for group in result["groups"]], [
-            "worldcup2026", "premier_league",
-        ])
-        self.assertEqual(result["errors"], [])
-
-    def test_only_requested_date_matches_are_returned(self):
-        result = self.aggregate({
-            "worldcup2026": [
-                {"id": 1, "date_key": "2026-08-16"},
-                {"id": 2, "date_key": "2026-08-17"},
-            ],
-            "premier_league": [
-                {"id": "pl-1", "kickoff_utc": "2026-08-15T21:00:00Z"},
-                {"id": "pl-2", "kickoff_utc": "2026-08-16T21:00:00Z"},
-            ],
-        })
-
-        self.assertEqual([[match["id"] for match in group["matches"]] for group in result["groups"]], [
-            [1], ["pl-1"],
-        ])
-
-    def test_empty_date_returns_no_groups(self):
-        result = self.aggregate({"worldcup2026": [], "premier_league": []})
-        self.assertEqual(result["groups"], [])
-        self.assertEqual(result["errors"], [])
-
-    def test_one_competition_failure_does_not_suppress_another(self):
-        result = self.aggregate({
-            "worldcup2026": [{"id": 1, "date_key": "2026-08-16"}],
-            "premier_league": RuntimeError("provider secret"),
-        })
-
-        self.assertEqual([group["competition"]["key"] for group in result["groups"]], ["worldcup2026"])
-        self.assertEqual(result["errors"], [{
-            "competition_key": "premier_league",
-            "season_key": "2026-2027",
-            "code": "provider_failure",
-            "message": "Matches could not be loaded for this competition.",
-        }])
-        self.assertNotIn("secret", str(result["errors"]))
-
-    def test_competition_order_follows_registry(self):
-        reversed_registry = list(reversed(COMPETITIONS))
-        result = self.aggregate({
-            "worldcup2026": [{"id": 1, "date_key": "2026-08-16"}],
-            "premier_league": [{"id": "pl-1", "kickoff_utc": "2026-08-16T01:00:00+00:00"}],
-        }, competitions=reversed_registry)
-
-        self.assertEqual([group["competition"]["key"] for group in result["groups"]], [
-            "premier_league", "worldcup2026",
-        ])
-
-    def test_match_order_is_chronological_with_stable_unknown_fallback(self):
-        result = self.aggregate({
-            "worldcup2026": [
-                {"id": "unknown-1", "date_key": "2026-08-16", "time_iran": "TBD"},
-                {"id": "late", "date_key": "2026-08-16", "time_iran": "20:30"},
-                {"id": "early", "date_key": "2026-08-16", "time_iran": "08:15"},
-                {"id": "unknown-2", "date_key": "2026-08-16", "time_iran": ""},
-            ],
-            "premier_league": [],
-        })
-
-        self.assertEqual([match["id"] for match in result["groups"][0]["matches"]], [
-            "early", "late", "unknown-1", "unknown-2",
-        ])
-
-    def test_null_or_naive_kickoff_is_not_assigned_to_a_guessed_date(self):
-        result = self.aggregate({
-            "worldcup2026": [],
-            "premier_league": [
-                {"id": "null", "kickoff_utc": None, "date_fa": "2026-08-16"},
-                {"id": "naive", "kickoff_utc": "2026-08-16T20:00:00"},
-                {"id": "aware", "kickoff_utc": "2026-08-16T12:00:00Z"},
-            ],
-        })
-
-        self.assertEqual([match["id"] for match in result["groups"][0]["matches"]], ["aware"])
+def daily_payload(groups=None, errors=None):
+    return {"date": DATE, "groups": [daily_group()] if groups is None else groups, "errors": errors or []}
 
 
 class AggregateMatchRouteTests(unittest.TestCase):
@@ -141,31 +38,139 @@ class AggregateMatchRouteTests(unittest.TestCase):
     def setUpClass(cls):
         cls.client = TestClient(main.api)
 
-    def test_invalid_date_returns_422(self):
-        for invalid_date in ("2026-02-30", "2026-8-16", "not-a-date"):
-            with self.subTest(invalid_date=invalid_date):
-                response = self.client.get(f"/matches/by-date?date={invalid_date}")
-                self.assertEqual(response.status_code, 422)
+    def request_daily(self, payload=None, error=None):
+        response = Mock()
+        response.json.return_value = payload if payload is not None else daily_payload()
+        with (
+            patch.object(adapter.requests, "get", return_value=response, side_effect=error) as get,
+            patch("competition_data_service.get_matches_for_season") as season,
+            patch("competition_service.get_competitions") as directory,
+            patch("main.get_real_matches") as worldcup,
+            patch.object(adapter, "get_season_matches") as full,
+            patch.object(adapter, "get_season_overview") as overview,
+            patch.object(adapter, "get_season_teams") as teams,
+            patch.object(adapter, "get_season_standings") as standings,
+            patch.dict("os.environ", {"GENERIC_FOOTBALL_WRAPPER_URL": "http://configured-wrapper:3060"}),
+        ):
+            result = self.client.get(f"/matches/by-date?date={DATE}")
+        get.assert_called_once()
+        self.assertEqual(get.call_args.args[0], f"http://configured-wrapper:3060/matches/by-date?date={DATE}")
+        for forbidden in (season, directory, worldcup, full, overview, teams, standings):
+            forbidden.assert_not_called()
+        self.assertEqual(result.status_code, 200)
+        return result.json()
+
+    def test_one_daily_request_preserves_public_contract_and_display_fields(self):
+        result = self.request_daily()
+        self.assertEqual(set(result), {"date", "groups", "errors"})
+        self.assertEqual(result["date"], DATE)
+        self.assertEqual(result["errors"], [])
+        group = result["groups"][0]
+        self.assertEqual(set(group), {"competition", "matches"})
+        self.assertEqual(set(group["competition"]), {"key", "name", "name_fa", "season_key", "type"})
+        match = group["matches"][0]
+        self.assertEqual(match["id"], "mp_match_daily")
+        self.assertEqual(match["home_team_id"], "mp_team_home")
+        self.assertEqual(match["home_en"], "Home")
+        self.assertEqual(match["home_fa"], "خانه")
+        self.assertTrue(match["is_live"])
+        self.assertEqual(match["score"], {"home": 1, "away": 0})
+        self.assertEqual(match["warnings"], ["kickoff_time_resolved_from_local_fields"])
+        self.assertNotIn("private", str(result))
+        self.assertNotIn("secret", str(result))
+
+    def test_empty_success(self):
+        self.assertEqual(self.request_daily(daily_payload([])), {"date": DATE, "groups": [], "errors": []})
+
+    def test_daily_group_order_and_all_matches_are_preserved(self):
+        first = daily_group("la_liga")
+        second = daily_group()
+        second["matches"] *= 20
+        result = self.request_daily(daily_payload([first, second]))
+        self.assertEqual([g["competition"]["key"] for g in result["groups"]], ["la_liga", "premier_league"])
+        self.assertEqual(len(result["groups"][1]["matches"]), 20)
+
+    def test_provider_failure_is_one_source_error_without_fallback(self):
+        for error in (requests.Timeout("secret"), requests.HTTPError("private URL"), ValueError("bad json secret")):
+            with self.subTest(error=type(error).__name__):
+                result = self.request_daily(error=error)
+                self.assertEqual(result["groups"], [])
+                self.assertEqual(len(result["errors"]), 1)
+                self.assertIsNone(result["errors"][0]["competition_key"])
+                self.assertNotIn("secret", str(result))
+                self.assertNotIn("private", str(result))
+
+    def test_invalid_wrapper_envelopes_fail_safely(self):
+        for payload in ([], {}, {"date": "2026-09-08", "groups": [], "errors": []},
+                        {"date": DATE, "groups": {}, "errors": []}):
+            with self.subTest(payload=payload):
+                result = self.request_daily(payload)
+                self.assertEqual(result["groups"], [])
+                self.assertEqual(len(result["errors"]), 1)
+
+    def test_partial_provider_errors_are_sanitized_without_losing_valid_groups(self):
+        result = self.request_daily(daily_payload(errors=[{
+            "competition_key": "la_liga", "season_key": "2026-2027", "message": "secret",
+        }]))
+        self.assertEqual(len(result["groups"]), 1)
+        self.assertEqual(result["errors"][0]["competition_key"], "la_liga")
+        self.assertNotIn("secret", str(result))
+
+    def test_malformed_group_is_isolated(self):
+        result = self.request_daily(daily_payload([None, daily_group()]))
+        self.assertEqual(len(result["groups"]), 1)
+        self.assertEqual(len(result["errors"]), 1)
+
+    def test_wrong_date_naive_missing_and_invalid_kickoffs_never_leak(self):
+        for kickoff in ("2026-09-07T21:00:00Z", "2026-09-07T12:00:00", None, "bad"):
+            with self.subTest(kickoff=kickoff):
+                group = daily_group()
+                group["matches"][0].update(kickoff_utc=kickoff, date_key=DATE)
+                result = self.request_daily(daily_payload([group]))
+                self.assertEqual(result["groups"], [])
+                self.assertTrue(result["errors"])
+
+    def test_scopes_and_provider_ids_are_rejected(self):
+        for changes in ({"id": "1234"}, {"home_team_id": "123"},
+                        {"competition_key": "la_liga"}, {"season_key": "2025-2026"}):
+            with self.subTest(changes=changes):
+                group = daily_group()
+                group["matches"][0].update(changes)
+                self.assertTrue(self.request_daily(daily_payload([group]))["errors"])
+
+    def test_archived_worldcup_and_unknown_scopes_not_exposed_or_separately_fetched(self):
+        for key, season in (("worldcup2026", "2026"), ("unknown", "2026"), ("premier_league", "unknown")):
+            result = self.request_daily(daily_payload([daily_group(key, season)]))
+            self.assertEqual(result["groups"], [])
+            self.assertTrue(result["errors"])
+
+    def test_invalid_date_returns_422_without_network(self):
+        with patch.object(adapter.requests, "get") as get:
+            for invalid_date in ("2026-02-30", "2026-9-7", "not-a-date", " 2026-09-07", "۲۰۲۶-۰۹-۰۷"):
+                with self.subTest(date=invalid_date):
+                    response = self.client.get("/matches/by-date", params={"date": invalid_date})
+                    self.assertEqual(response.status_code, 422)
+            get.assert_not_called()
 
     def test_legacy_matches_route_is_unchanged(self):
         matches = [{"id": 75}]
         with patch("main.get_real_matches", return_value=matches) as legacy:
             response = self.client.get("/matches?status=live")
-
-        self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"count": 1, "status": "live", "matches": matches})
         legacy.assert_called_once_with(status="live")
 
     def test_scoped_premier_league_route_is_unchanged(self):
         matches = [{"id": "mp_match_1"}]
         with patch("main.get_matches_for_season", return_value=matches) as scoped:
-            response = self.client.get(
-                "/competitions/premier_league/seasons/2026-2027/matches?status=all"
-            )
-
-        self.assertEqual(response.status_code, 200)
+            response = self.client.get("/competitions/premier_league/seasons/2026-2027/matches?status=all")
         self.assertEqual(response.json(), {"count": 1, "status": "all", "matches": matches})
         scoped.assert_called_once_with("premier_league", "2026-2027", status="all")
+
+    def test_wrapper_input_not_mutated(self):
+        payload = daily_payload()
+        original = copy.deepcopy(payload)
+        self.request_daily(payload)
+        self.assertEqual(payload, original)
 
 
 if __name__ == "__main__":

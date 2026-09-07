@@ -1,20 +1,9 @@
-import { useEffect, useRef, useState } from "react";
-import { fetchMatchesByDate } from "../api/football.js";
+import { useState } from "react";
+import { useDailyMatches, useTehranCalendarDates } from "../hooks/useDailyMatches.js";
 import CompetitionMatchGroup from "../components/competitions/CompetitionMatchGroup.jsx";
 import MatchCard from "../components/matches/MatchCard.jsx";
-import { getTehranCalendarDates } from "../utils/dates.js";
 
 const EMPTY_SET = new Set();
-const INITIAL_STATE = { groups: [], errors: [], failed: false, loading: true };
-
-function normalizePayload(payload) {
-  return {
-    groups: Array.isArray(payload?.groups) ? payload.groups : [],
-    errors: Array.isArray(payload?.errors) ? payload.errors : [],
-    failed: false,
-    loading: false,
-  };
-}
 
 function LiveSkeleton() {
   return (
@@ -30,34 +19,10 @@ function LiveSkeleton() {
 }
 
 export default function LivePage({ lang, t }) {
-  const [dates] = useState(() => getTehranCalendarDates());
+  const dates = useTehranCalendarDates();
   const [selectedDay, setSelectedDay] = useState("today");
-  const [result, setResult] = useState(INITIAL_STATE);
-  const [retryVersion, setRetryVersion] = useState(0);
-  const requestVersion = useRef(0);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    const currentRequest = requestVersion.current + 1;
-    requestVersion.current = currentRequest;
-
-    fetchMatchesByDate(dates[selectedDay], { signal: controller.signal })
-      .then((response) => {
-        if (!response.ok) throw new Error(`Aggregate matches request failed: ${response.status}`);
-        return response.json();
-      })
-      .then((payload) => {
-        if (requestVersion.current !== currentRequest || controller.signal.aborted) return;
-        setResult(normalizePayload(payload));
-      })
-      .catch((error) => {
-        if (error.name === "AbortError" || requestVersion.current !== currentRequest) return;
-        console.error("Failed to load Live match schedule:", error);
-        setResult({ groups: [], errors: [], failed: true, loading: false });
-      });
-
-    return () => controller.abort();
-  }, [dates, retryVersion, selectedDay]);
+  const result = useDailyMatches(dates[selectedDay]);
+  const { retry } = result;
 
   const dayOptions = [
     { key: "yesterday", label: t.yesterday },
@@ -72,12 +37,7 @@ export default function LivePage({ lang, t }) {
   const hasGroups = result.groups.length > 0;
   const selectDay = (day) => {
     if (day === selectedDay) return;
-    setResult((current) => ({ ...current, failed: false, loading: true }));
     setSelectedDay(day);
-  };
-  const retry = () => {
-    setResult((current) => ({ ...current, failed: false, loading: true }));
-    setRetryVersion((version) => version + 1);
   };
 
   return (
@@ -97,7 +57,7 @@ export default function LivePage({ lang, t }) {
         ))}
       </div>
 
-      {result.loading && !hasGroups && <LiveSkeleton />}
+      {result.loading && !result.hasPayload && <LiveSkeleton />}
 
       {hasGroups && (
         <div className={`home-competition-list ${result.loading ? "live-groups-loading" : ""}`} aria-busy={result.loading}>
