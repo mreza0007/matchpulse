@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useDailyMatches, useTehranCalendarDates } from "../hooks/useDailyMatches.js";
+import { useScopedMatchEvents } from "../hooks/useScopedMatchEvents.js";
 import CompetitionMatchGroup from "../components/competitions/CompetitionMatchGroup.jsx";
 import MatchCard from "../components/matches/MatchCard.jsx";
 
@@ -23,6 +24,7 @@ export default function LivePage({ lang, t }) {
   const [selectedDay, setSelectedDay] = useState("today");
   const result = useDailyMatches(dates[selectedDay]);
   const { retry } = result;
+  const matchEvents = useScopedMatchEvents();
 
   const dayOptions = [
     { key: "yesterday", label: t.yesterday },
@@ -37,6 +39,7 @@ export default function LivePage({ lang, t }) {
   const hasGroups = result.groups.length > 0;
   const selectDay = (day) => {
     if (day === selectedDay) return;
+    matchEvents.resetSelection();
     setSelectedDay(day);
   };
 
@@ -75,7 +78,7 @@ export default function LivePage({ lang, t }) {
                   key={`${group.competition?.key || groupIndex}:${match.id ?? matchIndex}`}
                   lang={lang}
                   match={match}
-                  showEvents={false}
+                  {...matchEvents.eventProps(match)}
                   showFavorites={false}
                   showPredictions={false}
                   showReminder={false}

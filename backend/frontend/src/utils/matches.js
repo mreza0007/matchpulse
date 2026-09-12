@@ -66,6 +66,18 @@ export function normalizeMatchStatus(match) {
     match?.raw_provider_status?.statusTitle,
     match?.raw_provider_status?.status_title,
   ].filter(Boolean).join(" ").toLowerCase();
+  const postponedTitle = [
+    match?.status_title,
+    match?.statusTitle,
+    match?.match_status,
+    match?.raw_provider_status?.statusTitle,
+    match?.raw_provider_status?.status_title,
+  ].some((value) => {
+    const normalized = String(value || "").trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+    return /^(?:postponed(?: match)?|match postponed|تعویق)$/u.test(normalized);
+  });
+  if (status === "postponed" || postponedTitle) return "postponed";
+
   const activeBreak = [
     "half time",
     "half-time",
@@ -96,7 +108,7 @@ export function normalizeMatchStatus(match) {
 }
 
 export function isFinishedMatch(match) {
-  return normalizeMatchStatus(match) === "finished" || match?.is_finished === true;
+  return normalizeMatchStatus(match) === "finished";
 }
 
 export function isPendingResultMatch(match) {
@@ -108,7 +120,11 @@ export function isResultTabMatch(match) {
 }
 
 export function isLiveMatch(match) {
-  return normalizeMatchStatus(match) === "live" || match?.is_live === true;
+  return normalizeMatchStatus(match) === "live";
+}
+
+export function isPostponedMatch(match) {
+  return normalizeMatchStatus(match) === "postponed";
 }
 
 export function isPastPendingResult(match) {
@@ -124,6 +140,7 @@ export function canShowEvents(match) {
 }
 
 export function isFutureMatchStatus(match) {
+  if (isPostponedMatch(match)) return false;
   if (match?.is_upcoming) return true;
 
   const status = String(match?.status || "").toLowerCase().replace(/[-\s]/g, "_");
@@ -145,11 +162,16 @@ export function getPredictionLabel(match, prediction, lang, t) {
 
 
 export function getHeroMatch(liveMatches, upcomingMatches, resultMatches) {
-  return liveMatches[0] || upcomingMatches[0] || resultMatches[0] || null;
+  const firstPlayingMatch = (matches) => matches.find((match) => !isPostponedMatch(match));
+  return firstPlayingMatch(liveMatches) ||
+    firstPlayingMatch(upcomingMatches) ||
+    firstPlayingMatch(resultMatches) ||
+    null;
 }
 
 export function getHeroMode(match) {
   if (!match) return "empty";
+  if (isPostponedMatch(match)) return "postponed";
   if (isLiveMatch(match)) return "live";
   if (isFutureMatchStatus(match)) return "upcoming";
   return "result";
@@ -226,6 +248,10 @@ export function getLiveDisplayBadge(match, lang, t) {
 }
 
 export function getHeroStatusLine(match, heroMode, lang, t, now) {
+  if (heroMode === "postponed") {
+    return { label: "", value: t.statusPostponed, isCountdown: false };
+  }
+
   if (heroMode === "upcoming") {
     const kickoffTime = getKickoffTime(match);
     return {
@@ -255,6 +281,10 @@ export function getMatchStatus(match, lang, t) {
 
   if (normalizedStatus === "pending_result") {
     return { key: "pending_result", label: t.scorePending };
+  }
+
+  if (normalizedStatus === "postponed") {
+    return { key: "postponed", label: t.statusPostponed };
   }
 
   if (normalizedStatus === "upcoming") {

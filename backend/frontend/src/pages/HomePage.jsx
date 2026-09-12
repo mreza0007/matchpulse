@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useDailyMatches, useTehranCalendarDates } from "../hooks/useDailyMatches.js";
+import { useScopedMatchEvents } from "../hooks/useScopedMatchEvents.js";
 import CompetitionMatchGroup from "../components/competitions/CompetitionMatchGroup.jsx";
 import HeroMatchCard from "../components/matches/HeroMatchCard.jsx";
 import MatchCard from "../components/matches/MatchCard.jsx";
@@ -57,6 +58,7 @@ export default function HomePage({ lang, t }) {
   const dates = useTehranCalendarDates();
   const today = useDailyMatches(dates.today);
   const tomorrow = useDailyMatches(dates.tomorrow);
+  const matchEvents = useScopedMatchEvents();
 
   const todayMatches = useMemo(
     () => today.groups.flatMap((group) => Array.isArray(group.matches) ? group.matches : []),
@@ -77,7 +79,7 @@ export default function HomePage({ lang, t }) {
       key={`${competition?.key || "competition"}:${match.id}`}
       lang={lang}
       match={match}
-      showEvents={false}
+      {...matchEvents.eventProps(match)}
       showFavorites={false}
       showPredictions={false}
       showReminder={false}

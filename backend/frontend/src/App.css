@@ -3382,6 +3382,12 @@ h1 {
   font-size: 11px;
 }
 
+.match-status.postponed {
+  border-color: rgba(243, 199, 102, 0.3);
+  background: rgba(243, 199, 102, 0.1);
+  color: var(--gold);
+}
+
 .temporary-page-shell {
   display: grid;
   justify-items: center;

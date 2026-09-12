@@ -9,6 +9,7 @@ import {
   getPredictionLabel,
   isFutureMatchStatus,
   isLiveMatch,
+  isPostponedMatch,
   isPredictionLocked,
 } from "../../utils/matches.js";
 import { getLocalizedTeamName, normalizeTeamKey } from "../../utils/teams.js";
@@ -58,9 +59,10 @@ export default function MatchCard({
 }) {
   const matchStatus = getMatchStatus(match, lang, t);
   const isLive = isLiveMatch(match);
+  const isPostponed = isPostponedMatch(match);
   const matchScoreValue = getMatchScore(match);
   const matchScore =
-    matchStatus.key === "upcoming" || matchStatus.key === "pending_result"
+    ["upcoming", "pending_result", "postponed"].includes(matchStatus.key)
       ? ""
       : matchScoreValue || (matchStatus.key === "live" ? "0 - 0" : "");
   const homeName = getLocalizedTeamName(match, "home", lang);
@@ -128,6 +130,9 @@ export default function MatchCard({
         {showStatusSummary && matchStatus.key === "upcoming" && (
           <span className="match-status upcoming-time">{matchDateTime.time}</span>
         )}
+        {matchStatus.key === "postponed" && (
+          <span className="match-status postponed">{matchStatus.label}</span>
+        )}
       </div>
 
       <div className="match-score-block">
@@ -150,7 +155,7 @@ export default function MatchCard({
       </div>
 
       <div className="match-meta-grid">
-        <span>🕒 {matchDateTime.time}</span>
+        {!isPostponed && <span>🕒 {matchDateTime.time}</span>}
         {match.group && (
           <span>
             🏆 {t.group} {match.group}
@@ -195,7 +200,7 @@ export default function MatchCard({
         </div>
       )}
 
-      {showReminder && (
+      {showReminder && !isPostponed && (
         <button
           aria-busy={isReminderPending}
           aria-pressed={isReminderActive}
