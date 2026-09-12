@@ -12,6 +12,7 @@ import {
   getFirstEventValue,
   getRenderedEventIcon,
   isCurrentEventRequest,
+  resolveEventTeam,
 } from "../src/utils/events.js";
 
 const testDirectory = fileURLToPath(new URL(".", import.meta.url));
@@ -190,6 +191,53 @@ test("existing MatchCard states and EventRow render normalized and legacy fields
   assert.match(row, /event\.away_score/);
   assert.match(row, /getFirstEventValue\(event, \["description"\]\)/);
   assert.match(row, /\["goal", "penalty_goal", "own_goal"\]/);
+});
+
+test("event teams preserve national flags and resolve home and away club logos", () => {
+  const match = {
+    home_flag: "🇪🇸",
+    home_logo: "https://images.example/home.png",
+    home_fa: "میزبان",
+    home_en: "Home",
+    away_flag: "",
+    away_logo: "https://images.example/away.png",
+    away_fa: "مهمان",
+    away_en: "Away",
+  };
+
+  assert.deepEqual(resolveEventTeam({ team_side: "home" }, match, "en"), {
+    flag: "🇪🇸",
+    logo: "https://images.example/home.png",
+    name: "Home",
+    englishName: "Home",
+  });
+  assert.deepEqual(resolveEventTeam({ team_side: "away" }, match, "en"), {
+    flag: "",
+    logo: "https://images.example/away.png",
+    name: "Away",
+    englishName: "Away",
+  });
+  assert.deepEqual(resolveEventTeam({ team_name: "Unknown club" }, match, "en"), {
+    flag: "",
+    logo: "",
+    name: "Unknown club",
+    englishName: "Unknown club",
+  });
+});
+
+test("EventRow passes flag and logo through TeamFlag's existing fallback order", () => {
+  const row = source("../src/components/matches/EventRow.jsx");
+  const teamFlag = source("../src/components/teams/TeamFlag.jsx");
+
+  assert.match(row, /flagEmoji=\{team\.flag\}/);
+  assert.match(row, /logoUrl=\{team\.logo\}/);
+  assert.match(row, /teamName=\{team\.englishName\}/);
+  assert.match(row, /team\.name \|\| team\.flag \|\| team\.logo/);
+  assert.match(teamFlag, /const imageUrl = flagImageUrl \|\| backendLogoUrl/);
+  assert.match(teamFlag, /flagEmoji \|\| "⚽"/);
+  assert.match(row, /type === "substitution"/);
+  assert.match(row, /getEventPlayer\(event\)/);
+  assert.match(row, /providedLabel \|\| getEventTypeLabel\(type, lang\)/);
 });
 
 test("World Cup archive remains separate from generic event controls", () => {

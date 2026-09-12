@@ -58,9 +58,13 @@ export default function EventRow({ event, match, lang, t, index }) {
           <span className="event-score">{event.home_score} - {event.away_score}</span>
         )}
         {description && <span className="event-description">{description}</span>}
-        {(team.name || team.flag) && (
+        {(team.name || team.flag || team.logo) && (
           <small className="event-team">
-            <TeamFlag flagEmoji={team.flag} teamName={team.englishName} />
+            <TeamFlag
+              flagEmoji={team.flag}
+              logoUrl={team.logo}
+              teamName={team.englishName}
+            />
             {team.name}
           </small>
         )}

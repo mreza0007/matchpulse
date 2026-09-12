@@ -101,6 +101,7 @@ export function resolveEventTeam(event, match, lang) {
   if (side === "home") {
     return {
       flag: match.home_flag,
+      logo: match.home_logo,
       name: getLocalizedTeamName(match, "home", lang),
       englishName: match.home_en,
     };
@@ -109,6 +110,7 @@ export function resolveEventTeam(event, match, lang) {
   if (side === "away") {
     return {
       flag: match.away_flag,
+      logo: match.away_logo,
       name: getLocalizedTeamName(match, "away", lang),
       englishName: match.away_en,
     };
@@ -119,6 +121,7 @@ export function resolveEventTeam(event, match, lang) {
 
   return {
     flag: "",
+    logo: "",
     name: blockedNames.has(String(teamName).toLowerCase()) ? "" : teamName,
     englishName: teamName,
   };
