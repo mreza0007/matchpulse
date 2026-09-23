@@ -63,9 +63,9 @@ test("overview and full schedule use isolated state and render paths", () => {
   assert.match(page, /const \[overviewMatches, setOverviewMatches\]/);
   assert.match(page, /const \[fullMatches, setFullMatches\]/);
   assert.match(page, /overviewMatch\(overviewMatches\.items\)/);
-  assert.match(page, /groupMatchesByDate\(fullMatches\.items, lang\)/);
+  assert.match(page, /groupMatchesByDate\(displayedMatches, lang\)/);
   assert.match(page, /payload\.matches\.map\(normalizeMatchPayload\)/);
-  assert.match(page, /setFullMatches\(\{ items, loading: false, loaded: true, failed: false \}\)/);
+  assert.match(page, /setFullMatches\(\{ items, loading: false, loaded: true, failed: false, scopeModel \}\)/);
 });
 
 test("competition switches abort both requests and remount isolated state", () => {

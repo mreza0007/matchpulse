@@ -1,6 +1,6 @@
 import { API_BASE_URL } from "../api/client.js";
 
-function genericCompetitionConfig(competitionKey, seasonKey, labels, logoFallback) {
+function genericCompetitionConfig(competitionKey, seasonKey, labels, logoFallback, logoSrc) {
   const competition = encodeURIComponent(competitionKey);
   const season = encodeURIComponent(seasonKey);
   return {
@@ -18,7 +18,7 @@ function genericCompetitionConfig(competitionKey, seasonKey, labels, logoFallbac
         `${API_BASE_URL}/competitions/${competition}/seasons/${season}/matches/${encodeURIComponent(matchId)}/events`
       ),
     },
-    logoSrc: "",
+    logoSrc,
     logoFallback,
     fixedStats: null,
     supportsScopedEvents: true,
@@ -61,7 +61,7 @@ export const COMPETITIONS = {
       teams: `${API_BASE_URL}/competitions/premier_league/seasons/2026-2027/teams`,
       events: (matchId) => `${API_BASE_URL}/competitions/premier_league/seasons/2026-2027/matches/${encodeURIComponent(matchId)}/events`,
     },
-    logoSrc: "",
+    logoSrc: "/competition-logos/premier-league.svg",
     logoFallback: "PL",
     fixedStats: null,
     supportsScopedEvents: true,
@@ -69,25 +69,32 @@ export const COMPETITIONS = {
   persian_gulf_pro_league: genericCompetitionConfig(
     "persian_gulf_pro_league", "1405-1406",
     { fa: "لیگ برتر خلیج فارس", en: "Persian Gulf Pro League" }, "PGPL",
+    "/competition-logos/persian-gulf-pro-league.png",
   ),
   la_liga: genericCompetitionConfig(
     "la_liga", "2026-2027", { fa: "لالیگا", en: "La Liga" }, "LL",
+    "/competition-logos/la-liga.svg",
   ),
   serie_a: genericCompetitionConfig(
     "serie_a", "2026-2027", { fa: "سری آ", en: "Serie A" }, "SA",
+    "/competition-logos/serie-a.svg",
   ),
   bundesliga: genericCompetitionConfig(
     "bundesliga", "2026-2027", { fa: "بوندس‌لیگا", en: "Bundesliga" }, "BL",
+    "/competition-logos/bundesliga.svg",
   ),
   ligue_1: genericCompetitionConfig(
     "ligue_1", "2026-2027", { fa: "لیگ ۱ فرانسه", en: "Ligue 1" }, "L1",
+    "/competition-logos/ligue-1.svg",
   ),
   champions_league: genericCompetitionConfig(
     "champions_league", "2026-2027",
     { fa: "لیگ قهرمانان اروپا", en: "UEFA Champions League" }, "UCL",
+    "/competition-logos/champions-league.svg",
   ),
   europa_league: genericCompetitionConfig(
     "europa_league", "2026-2027",
     { fa: "لیگ اروپا", en: "UEFA Europa League" }, "UEL",
+    "/competition-logos/europa-league.svg",
   ),
 };

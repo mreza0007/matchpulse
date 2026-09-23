@@ -129,7 +129,7 @@ export default function CompetitionsPage({
                 onClick={() => setSelectedCompetition(competition)}
                 type="button"
               >
-                <CompetitionLogo competition={competition} />
+                <CompetitionLogo competition={competition} lang={lang} />
                 <span className="competition-directory-copy">
                   <strong>{getCompetitionName(competition, lang)}</strong>
                   {competition.season_key && <small>{t.season}: {competition.season_key}</small>}

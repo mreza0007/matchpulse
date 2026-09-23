@@ -34,7 +34,7 @@ test("date groups progress in bounded chunks until all are visible", () => {
 test("CompetitionPage resets only when a successful full payload is installed", () => {
   const page = source("../src/pages/CompetitionPage.jsx");
   const directory = source("../src/pages/CompetitionsPage.jsx");
-  const successStart = page.indexOf("const groups = groupMatchesByDate(items, \"en\")");
+  const successStart = page.indexOf("const groups = groupMatchesByDate(selectedMatches, \"en\")");
   const eventStart = page.indexOf("const toggleMatchEvents");
   const eventEnd = page.indexOf("const renderDisplayMatchCard", eventStart);
   const reminderStart = page.indexOf("function DisplayMatchCard");

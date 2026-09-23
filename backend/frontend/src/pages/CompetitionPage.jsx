@@ -12,6 +12,7 @@ import CompetitionLogo from "../components/competitions/CompetitionLogo.jsx";
 import CompetitionTabs from "../components/competitions/CompetitionTabs.jsx";
 import GroupTable from "../components/competitions/GroupTable.jsx";
 import KnockoutRound from "../components/competitions/KnockoutRound.jsx";
+import RoundSelector from "../components/competitions/RoundSelector.jsx";
 import StandingsTable from "../components/competitions/StandingsTable.jsx";
 import MatchCard from "../components/matches/MatchCard.jsx";
 import TeamFlag from "../components/teams/TeamFlag.jsx";
@@ -26,6 +27,11 @@ import {
 } from "../utils/reminders.js";
 import { getKickoffTime, groupMatchesByDate } from "../utils/dates.js";
 import {
+  buildCompetitionMatchScopes,
+  selectRelevantRound,
+} from "../utils/competitionRounds.js";
+import {
+  INITIAL_VISIBLE_MATCH_GROUPS,
   initialVisibleGroupCount,
   nextVisibleGroupCount,
   visibleGroupSlice,
@@ -53,7 +59,13 @@ const FORMAT_TABS = {
   knockout_only: ["overview", "matches", "knockout", "stats", "teams"],
 };
 const INITIAL_OVERVIEW_MATCHES = { items: [], loading: true, loaded: false, failed: false };
-const INITIAL_FULL_MATCHES = { items: [], loading: false, loaded: false, failed: false };
+const INITIAL_FULL_MATCHES = {
+  items: [],
+  loading: false,
+  loaded: false,
+  failed: false,
+  scopeModel: { mode: "fallback", scopes: [] },
+};
 const INITIAL_TEAMS = { items: [], loading: false, loaded: false, failed: false };
 const INITIAL_STANDINGS = { items: [], loading: false, loaded: false, failed: false };
 const INITIAL_GROUPS = { items: [], loading: false, loaded: false, failed: false };
@@ -212,6 +224,8 @@ function ActiveCompetitionPage({
   const [knockoutRetryVersion, setKnockoutRetryVersion] = useState(0);
   const [fullMatchesRequested, setFullMatchesRequested] = useState(false);
   const [visibleMatchGroupCount, setVisibleMatchGroupCount] = useState(0);
+  const [selectedScopeKey, setSelectedScopeKey] = useState("");
+  const [relevantScope, setRelevantScope] = useState({ scopeKey: "", reason: "none" });
   const [teamsRequested, setTeamsRequested] = useState(false);
   const [standingsRequested, setStandingsRequested] = useState(isLeague);
   const [groupsRequested, setGroupsRequested] = useState(isGroupKnockout);
@@ -276,20 +290,32 @@ function ActiveCompetitionPage({
         const items = Array.isArray(payload?.matches)
           ? payload.matches.map(normalizeMatchPayload)
           : [];
-        const groups = groupMatchesByDate(items, "en");
+        const scopeModel = buildCompetitionMatchScopes(items, {
+          format: competition.format,
+          supports_standings: competition.supports_standings,
+        });
+        const relevant = selectRelevantRound(scopeModel.scopes);
+        const selectedMatches = scopeModel.mode === "fallback"
+          ? items
+          : scopeModel.scopes.find((scope) => scope.key === relevant.scopeKey)?.matches || [];
+        const groups = groupMatchesByDate(selectedMatches, "en");
+        setSelectedScopeKey(relevant.scopeKey);
+        setRelevantScope(relevant);
         setVisibleMatchGroupCount(initialVisibleGroupCount(groups.length));
-        setFullMatches({ items, loading: false, loaded: true, failed: false });
+        setFullMatches({ items, loading: false, loaded: true, failed: false, scopeModel });
       })
       .catch((error) => {
         if (error.name === "AbortError") return;
         console.error("Failed to load full competition matches:", error);
-        setFullMatches({ items: [], loading: false, loaded: false, failed: true });
+        setFullMatches({ ...INITIAL_FULL_MATCHES, failed: true });
       });
 
     return () => controller.abort();
   }, [
     competition.competition_key,
+    competition.format,
     competition.season_key,
+    competition.supports_standings,
     fullMatchesRequested,
     fullMatchesRetryVersion,
   ]);
@@ -439,18 +465,38 @@ function ActiveCompetitionPage({
     knockoutRetryVersion,
   ]);
 
+  const selectedScope = useMemo(
+    () => fullMatches.scopeModel.scopes.find((scope) => scope.key === selectedScopeKey) || null,
+    [fullMatches.scopeModel.scopes, selectedScopeKey],
+  );
+  const displayedMatches = useMemo(
+    () => fullMatches.scopeModel.mode === "fallback"
+      ? fullMatches.items
+      : selectedScope?.matches || [],
+    [fullMatches.items, fullMatches.scopeModel.mode, selectedScope],
+  );
   const matchGroups = useMemo(
-    () => groupMatchesByDate(fullMatches.items, lang),
-    [fullMatches.items, lang],
+    () => groupMatchesByDate(displayedMatches, lang),
+    [displayedMatches, lang],
   );
+  const usesProgressiveGroups = fullMatches.scopeModel.mode !== "round"
+    && matchGroups.length > INITIAL_VISIBLE_MATCH_GROUPS;
   const visibleMatchGroups = useMemo(
-    () => visibleGroupSlice(matchGroups, visibleMatchGroupCount),
-    [matchGroups, visibleMatchGroupCount],
+    () => usesProgressiveGroups
+      ? visibleGroupSlice(matchGroups, visibleMatchGroupCount)
+      : matchGroups,
+    [matchGroups, usesProgressiveGroups, visibleMatchGroupCount],
   );
-  const hasMoreMatchGroups = visibleMatchGroupCount < matchGroups.length;
+  const hasMoreMatchGroups = usesProgressiveGroups && visibleMatchGroupCount < matchGroups.length;
   const loadMoreMatchGroups = useCallback(() => {
     setVisibleMatchGroupCount((current) => nextVisibleGroupCount(current, matchGroups.length));
   }, [matchGroups.length]);
+  const selectMatchScope = useCallback((scopeKey) => {
+    const scope = fullMatches.scopeModel.scopes.find((candidate) => candidate.key === scopeKey);
+    if (!scope) return;
+    setSelectedScopeKey(scopeKey);
+    setVisibleMatchGroupCount(initialVisibleGroupCount(groupMatchesByDate(scope.matches, "en").length));
+  }, [fullMatches.scopeModel.scopes]);
 
   useEffect(() => {
     if (activeTab !== "matches" || !hasMoreMatchGroups || typeof IntersectionObserver === "undefined") {
@@ -755,26 +801,40 @@ function ActiveCompetitionPage({
     if (fullMatches.items.length === 0) return <div className="home-empty-state">{t.competitionMatchesEmpty}</div>;
 
     return (
-      <div className="competition-match-groups">
-        {visibleMatchGroups.map((group) => (
-          <section className="match-day-group" key={group.dateKey}>
-            <h2 className="match-day-header">{group.label || t.dateUnavailable}</h2>
-            <div className="match-day-list">
-              {group.matches.map((match, index) => renderDisplayMatchCard(
-                match,
-                `${competition.competition_key}:${match.id ?? index}`,
-              ))}
-            </div>
-          </section>
-        ))}
-        {hasMoreMatchGroups && (
-          <div className="competition-match-more" ref={matchGroupSentinelRef}>
-            <button onClick={loadMoreMatchGroups} type="button">
-              {t.loadMoreMatches}
-            </button>
-          </div>
+      <>
+        {fullMatches.scopeModel.mode !== "fallback" && (
+          <RoundSelector
+            lang={lang}
+            mode={fullMatches.scopeModel.mode}
+            onSelect={selectMatchScope}
+            relevantReason={relevantScope.reason}
+            relevantScopeKey={relevantScope.scopeKey}
+            scopes={fullMatches.scopeModel.scopes}
+            selectedScopeKey={selectedScopeKey}
+            t={t}
+          />
         )}
-      </div>
+        <div className="competition-match-groups">
+          {visibleMatchGroups.map((group) => (
+            <section className="match-day-group" key={group.dateKey}>
+              <h2 className="match-day-header">{group.label || t.dateUnavailable}</h2>
+              <div className="match-day-list">
+                {group.matches.map((match, index) => renderDisplayMatchCard(
+                  match,
+                  `${competition.competition_key}:${match.id ?? index}`,
+                ))}
+              </div>
+            </section>
+          ))}
+          {hasMoreMatchGroups && (
+            <div className="competition-match-more" ref={matchGroupSentinelRef}>
+              <button onClick={loadMoreMatchGroups} type="button">
+                {t.loadMoreMatches}
+              </button>
+            </div>
+          )}
+        </div>
+      </>
     );
   };
 
@@ -900,7 +960,7 @@ function ActiveCompetitionPage({
       </button>
 
       <div className="competition-detail-identity">
-        <CompetitionLogo competition={competition} />
+        <CompetitionLogo competition={competition} eager lang={lang} />
         <div>
           <h1>{getCompetitionName(competition, lang)}</h1>
           {competition.season_key && <p>{t.season}: {competition.season_key}</p>}
