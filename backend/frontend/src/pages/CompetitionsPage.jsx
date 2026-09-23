@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchCompetitions } from "../api/football.js";
+import { loadCompetitionDirectory } from "../api/competitionDirectory.js";
 import {
   COMPETITION_CATEGORY_BY_KEY,
   COMPETITION_CATEGORY_ORDER,
@@ -40,11 +40,10 @@ export default function CompetitionsPage({
   useEffect(() => {
     const controller = new AbortController();
 
-    fetchCompetitions({ signal: controller.signal })
-      .then((response) => {
-        if (!response.ok) throw new Error(`Competitions request failed: ${response.status}`);
-        return response.json();
-      })
+    loadCompetitionDirectory({
+      force: retryVersion > 0,
+      signal: controller.signal,
+    })
       .then((payload) => {
         if (controller.signal.aborted) return;
         setCompetitions(Array.isArray(payload?.competitions) ? payload.competitions : []);

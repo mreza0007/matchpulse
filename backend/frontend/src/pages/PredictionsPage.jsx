@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { fetchCompetitions } from "../api/football.js";
+import { loadCompetitionDirectory } from "../api/competitionDirectory.js";
 import {
   fetchPredictableMatches,
   fetchPredictionHistory,
@@ -110,8 +110,10 @@ export default function PredictionsPage({ lang, t, telegramId }) {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetchCompetitions({ signal: controller.signal })
-      .then(responseJson)
+    loadCompetitionDirectory({
+      force: directoryRetry > 0,
+      signal: controller.signal,
+    })
       .then((payload) => {
         if (controller.signal.aborted) return;
         const enabled = Array.isArray(payload.competitions)
