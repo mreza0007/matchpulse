@@ -1,3 +1,4 @@
+import { memo } from "react";
 import EventRow from "./EventRow.jsx";
 import TeamFlag from "../teams/TeamFlag.jsx";
 import { formatTehranMatchDateTime } from "../../utils/dates.js";
@@ -8,8 +9,6 @@ import {
   getPenaltySummary,
   getPredictionLabel,
   isFutureMatchStatus,
-  isLiveMatch,
-  isPostponedMatch,
   isPredictionLocked,
 } from "../../utils/matches.js";
 import { getLocalizedTeamName, normalizeTeamKey } from "../../utils/teams.js";
@@ -25,7 +24,7 @@ function PenaltySummary({ match, lang }) {
   );
 }
 
-export default function MatchCard({
+function MatchCard({
   match,
   t,
   showReminder = true,
@@ -34,6 +33,8 @@ export default function MatchCard({
   isReminderActive = false,
   homeTeam,
   awayTeam,
+  homeLogo = "",
+  awayLogo = "",
   favoriteTeamIds,
   favoriteTeamKeys,
   onFavoriteToggle,
@@ -58,8 +59,8 @@ export default function MatchCard({
   showStatusSummary = false,
 }) {
   const matchStatus = getMatchStatus(match, lang, t);
-  const isLive = isLiveMatch(match);
-  const isPostponed = isPostponedMatch(match);
+  const isLive = matchStatus.key === "live";
+  const isPostponed = matchStatus.key === "postponed";
   const matchScoreValue = getMatchScore(match);
   const matchScore =
     ["upcoming", "pending_result", "postponed"].includes(matchStatus.key)
@@ -70,10 +71,10 @@ export default function MatchCard({
   const shouldShowScoreFallback = !matchScore && ["finished", "pending_result"].includes(matchStatus.key);
   const matchDateTime = formatTehranMatchDateTime(match, lang);
   const canViewEvents = showEvents && canShowEvents(match);
-  const predictionLocked = predictionForceLocked || isPredictionLocked(match);
-  const showPrediction = isFutureMatchStatus(match) || Boolean(prediction);
+  const predictionLocked = showPredictions && (predictionForceLocked || isPredictionLocked(match));
+  const showPrediction = showPredictions && (isFutureMatchStatus(match) || Boolean(prediction));
   const stopCardClick = (event) => event.stopPropagation();
-  const renderTeamName = (name, flag, englishName, team) => {
+  const renderTeamName = (name, flag, englishName, team, logo) => {
     const isFavorite = team
       ? favoriteTeamIds.has(String(team.id)) ||
         favoriteTeamKeys.has(normalizeTeamKey(team.team_key || team.name_en || team.name_fa || team.team_name || team.id))
@@ -83,7 +84,7 @@ export default function MatchCard({
       <strong className="team-name">
         <TeamFlag
           flagEmoji={flag}
-          logoUrl={team?.logo || team?.logo_url || ""}
+          logoUrl={logo || team?.logo || team?.logo_url || ""}
           teamName={englishName}
         />
         {name}
@@ -137,7 +138,7 @@ export default function MatchCard({
 
       <div className="match-score-block">
         <div className="teams">
-          {renderTeamName(homeName, match.home_flag, match.home_en, homeTeam)}
+          {renderTeamName(homeName, match.home_flag, match.home_en, homeTeam, homeLogo)}
           <span
             className={
               matchScore
@@ -149,7 +150,7 @@ export default function MatchCard({
           >
             {matchScore || (shouldShowScoreFallback ? t.scorePending : t.vs)}
           </span>
-          {renderTeamName(awayName, match.away_flag, match.away_en, awayTeam)}
+          {renderTeamName(awayName, match.away_flag, match.away_en, awayTeam, awayLogo)}
         </div>
         <PenaltySummary match={match} lang={lang} />
       </div>
@@ -254,3 +255,5 @@ export default function MatchCard({
     </article>
   );
 }
+
+export default memo(MatchCard);

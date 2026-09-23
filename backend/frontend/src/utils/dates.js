@@ -22,6 +22,15 @@ export function getKickoffTime(match) {
   return parseKickoffDate(match)?.getTime() ?? Number.POSITIVE_INFINITY;
 }
 
+const dateTimeFormatters = new Map();
+
+function getDateTimeFormatter(key, locale, options) {
+  if (!dateTimeFormatters.has(key)) {
+    dateTimeFormatters.set(key, new Intl.DateTimeFormat(locale, options));
+  }
+  return dateTimeFormatters.get(key);
+}
+
 export function getMatchDateKey(match) {
   if (match?.date_key) return match.date_key;
 
@@ -30,7 +39,7 @@ export function getMatchDateKey(match) {
     return String(match?.date_iran || match?.date || match?.date_fa || "").trim();
   }
 
-  return new Intl.DateTimeFormat("en-CA", {
+  return getDateTimeFormatter("tehran-date-key", "en-CA", {
     timeZone: "Asia/Tehran",
     year: "numeric",
     month: "2-digit",
@@ -50,13 +59,13 @@ export function formatTehranMatchDateTime(match, lang) {
   }
 
   const locale = lang === "fa" ? "fa-IR-u-ca-persian" : "en-US";
-  const date = new Intl.DateTimeFormat(locale, {
+  const date = getDateTimeFormatter(`match-date:${locale}`, locale, {
     timeZone: "Asia/Tehran",
     month: "short",
     day: "numeric",
     weekday: "short",
   }).format(kickoffDate);
-  const time = new Intl.DateTimeFormat(locale, {
+  const time = getDateTimeFormatter(`match-time:${locale}`, locale, {
     timeZone: "Asia/Tehran",
     hour: "2-digit",
     minute: "2-digit",
@@ -129,7 +138,7 @@ export function formatCountdown(milliseconds, lang) {
 }
 
 export function getTehranCalendarDates(now = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-US", {
+  const parts = getDateTimeFormatter("tehran-calendar-parts", "en-US", {
     timeZone: "Asia/Tehran",
     year: "numeric",
     month: "2-digit",

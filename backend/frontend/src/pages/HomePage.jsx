@@ -72,10 +72,10 @@ export default function HomePage({ lang, t }) {
 
   const renderMatch = (match, competition, variant = "standard") => (
     <MatchCard
-      awayTeam={match.away_logo ? { logo: match.away_logo } : undefined}
+      awayLogo={match.away_logo || ""}
       favoriteTeamIds={EMPTY_SET}
       favoriteTeamKeys={EMPTY_SET}
-      homeTeam={match.home_logo ? { logo: match.home_logo } : undefined}
+      homeLogo={match.home_logo || ""}
       key={`${competition?.key || "competition"}:${match.id}`}
       lang={lang}
       match={match}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchCompetitionGroups,
   fetchCompetitionKnockout,
@@ -25,6 +25,11 @@ import {
   reminderIdentityKey,
 } from "../utils/reminders.js";
 import { getKickoffTime, groupMatchesByDate } from "../utils/dates.js";
+import {
+  initialVisibleGroupCount,
+  nextVisibleGroupCount,
+  visibleGroupSlice,
+} from "../utils/progressiveGroups.js";
 import {
   isFutureMatchStatus,
   isLiveMatch,
@@ -112,10 +117,10 @@ function DisplayMatchCard({
 
   return (
     <MatchCard
-      awayTeam={match.away_logo ? { logo: match.away_logo } : undefined}
+      awayLogo={match.away_logo || ""}
       favoriteTeamIds={EMPTY_SET}
       favoriteTeamKeys={EMPTY_SET}
-      homeTeam={match.home_logo ? { logo: match.home_logo } : undefined}
+      homeLogo={match.home_logo || ""}
       isReminderActive={Boolean(identityKey && reminderIdentityKeys.has(identityKey))}
       isReminderPending={Boolean(identityKey && reminderPendingKeys.has(identityKey))}
       events={eventState.events}
@@ -206,6 +211,7 @@ function ActiveCompetitionPage({
   const [groupsRetryVersion, setGroupsRetryVersion] = useState(0);
   const [knockoutRetryVersion, setKnockoutRetryVersion] = useState(0);
   const [fullMatchesRequested, setFullMatchesRequested] = useState(false);
+  const [visibleMatchGroupCount, setVisibleMatchGroupCount] = useState(0);
   const [teamsRequested, setTeamsRequested] = useState(false);
   const [standingsRequested, setStandingsRequested] = useState(isLeague);
   const [groupsRequested, setGroupsRequested] = useState(isGroupKnockout);
@@ -214,6 +220,7 @@ function ActiveCompetitionPage({
   const [eventStatesByIdentity, setEventStatesByIdentity] = useState({});
   const eventRequestRef = useRef(null);
   const eventRequestVersionRef = useRef(0);
+  const matchGroupSentinelRef = useRef(null);
 
   useEffect(() => {
     return () => {
@@ -269,6 +276,8 @@ function ActiveCompetitionPage({
         const items = Array.isArray(payload?.matches)
           ? payload.matches.map(normalizeMatchPayload)
           : [];
+        const groups = groupMatchesByDate(items, "en");
+        setVisibleMatchGroupCount(initialVisibleGroupCount(groups.length));
         setFullMatches({ items, loading: false, loaded: true, failed: false });
       })
       .catch((error) => {
@@ -434,6 +443,33 @@ function ActiveCompetitionPage({
     () => groupMatchesByDate(fullMatches.items, lang),
     [fullMatches.items, lang],
   );
+  const visibleMatchGroups = useMemo(
+    () => visibleGroupSlice(matchGroups, visibleMatchGroupCount),
+    [matchGroups, visibleMatchGroupCount],
+  );
+  const hasMoreMatchGroups = visibleMatchGroupCount < matchGroups.length;
+  const loadMoreMatchGroups = useCallback(() => {
+    setVisibleMatchGroupCount((current) => nextVisibleGroupCount(current, matchGroups.length));
+  }, [matchGroups.length]);
+
+  useEffect(() => {
+    if (activeTab !== "matches" || !hasMoreMatchGroups || typeof IntersectionObserver === "undefined") {
+      return undefined;
+    }
+
+    const sentinel = matchGroupSentinelRef.current;
+    if (!sentinel) return undefined;
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        observer.disconnect();
+        loadMoreMatchGroups();
+      }
+    }, { rootMargin: "240px 0px" });
+    observer.observe(sentinel);
+
+    return () => observer.disconnect();
+  }, [activeTab, hasMoreMatchGroups, loadMoreMatchGroups]);
   const primaryMatch = useMemo(
     () => overviewMatch(overviewMatches.items),
     [overviewMatches.items],
@@ -720,7 +756,7 @@ function ActiveCompetitionPage({
 
     return (
       <div className="competition-match-groups">
-        {matchGroups.map((group) => (
+        {visibleMatchGroups.map((group) => (
           <section className="match-day-group" key={group.dateKey}>
             <h2 className="match-day-header">{group.label || t.dateUnavailable}</h2>
             <div className="match-day-list">
@@ -731,6 +767,13 @@ function ActiveCompetitionPage({
             </div>
           </section>
         ))}
+        {hasMoreMatchGroups && (
+          <div className="competition-match-more" ref={matchGroupSentinelRef}>
+            <button onClick={loadMoreMatchGroups} type="button">
+              {t.loadMoreMatches}
+            </button>
+          </div>
+        )}
       </div>
     );
   };

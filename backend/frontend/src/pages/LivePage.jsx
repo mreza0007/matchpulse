@@ -45,6 +45,10 @@ export default function LivePage({ lang, t }) {
 
   return (
     <section className="live-page">
+      <header className="live-page-header">
+        <span className="live-page-indicator" aria-hidden="true" />
+        <h1>{t.liveMatches}</h1>
+      </header>
       <div className="live-date-selector" aria-label={t.liveMatches} role="tablist">
         {dayOptions.map((option) => (
           <button
@@ -71,10 +75,10 @@ export default function LivePage({ lang, t }) {
             >
               {(group.matches || []).map((match, matchIndex) => (
                 <MatchCard
-                  awayTeam={match.away_logo ? { logo: match.away_logo } : undefined}
+                  awayLogo={match.away_logo || ""}
                   favoriteTeamIds={EMPTY_SET}
                   favoriteTeamKeys={EMPTY_SET}
-                  homeTeam={match.home_logo ? { logo: match.home_logo } : undefined}
+                  homeLogo={match.home_logo || ""}
                   key={`${group.competition?.key || groupIndex}:${match.id ?? matchIndex}`}
                   lang={lang}
                   match={match}

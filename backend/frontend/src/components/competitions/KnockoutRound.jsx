@@ -26,10 +26,10 @@ export default function KnockoutRound({ competitionKey, lang, renderMatch, round
           if (renderMatch) return renderMatch(match, index);
           return (
             <MatchCard
-              awayTeam={match.away_logo ? { logo: match.away_logo } : undefined}
+              awayLogo={match.away_logo || ""}
               favoriteTeamIds={EMPTY_SET}
               favoriteTeamKeys={EMPTY_SET}
-              homeTeam={match.home_logo ? { logo: match.home_logo } : undefined}
+              homeLogo={match.home_logo || ""}
               key={`${competitionKey}:${round.round_key}:${match.id ?? index}`}
               lang={lang}
               match={match}
