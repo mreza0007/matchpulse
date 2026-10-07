@@ -1325,6 +1325,10 @@ async def startup():
         favorite_teams=favorite_teams,
         get_matches=get_real_matches,
         get_events=get_match_events,
+        get_daily_matches=aggregate_matches_by_date,
+        get_live_match=get_match_live_for_season,
+        get_scoped_events=get_match_events_for_season,
+        get_competitions=get_competitions,
         event_loop=asyncio.get_running_loop(),
     )
 

@@ -407,7 +407,9 @@ class ReminderSchedulerTests(unittest.TestCase):
         enabled = {
             "premier_league", "persian_gulf_pro_league", "la_liga",
             "serie_a", "bundesliga", "ligue_1", "champions_league",
-            "europa_league",
+            "europa_league", "uefa_nations_league_a",
+            "uefa_nations_league_b", "uefa_nations_league_c",
+            "uefa_nations_league_d",
         }
         self.assertEqual(
             {key for key, item in competitions.items() if item["supports_reminders"]},

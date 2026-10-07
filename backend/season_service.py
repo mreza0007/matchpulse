@@ -74,6 +74,38 @@ SEASONS.extend([
         "status": "active",
         "is_default": True,
     },
+    {
+        "competition_key": "uefa_nations_league_a",
+        "season_key": "2026-2027",
+        "name_fa": "لیگ ملت‌های اروپا (A) ۲۰۲۶-۲۰۲۷",
+        "name_en": "UEFA Nations League A 2026-2027",
+        "status": "active",
+        "is_default": True,
+    },
+    {
+        "competition_key": "uefa_nations_league_b",
+        "season_key": "2026-2027",
+        "name_fa": "لیگ ملت‌های اروپا (B) ۲۰۲۶-۲۰۲۷",
+        "name_en": "UEFA Nations League B 2026-2027",
+        "status": "active",
+        "is_default": True,
+    },
+    {
+        "competition_key": "uefa_nations_league_c",
+        "season_key": "2026-2027",
+        "name_fa": "لیگ ملت‌های اروپا (C) ۲۰۲۶-۲۰۲۷",
+        "name_en": "UEFA Nations League C 2026-2027",
+        "status": "active",
+        "is_default": True,
+    },
+    {
+        "competition_key": "uefa_nations_league_d",
+        "season_key": "2026-2027",
+        "name_fa": "لیگ ملت‌های اروپا (D) ۲۰۲۶-۲۰۲۷",
+        "name_en": "UEFA Nations League D 2026-2027",
+        "status": "active",
+        "is_default": True,
+    },
 ])
 
 

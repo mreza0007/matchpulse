@@ -366,6 +366,10 @@ class GenericEventRouteTests(unittest.TestCase):
             "ligue_1",
             "champions_league",
             "europa_league",
+            "uefa_nations_league_a",
+            "uefa_nations_league_b",
+            "uefa_nations_league_c",
+            "uefa_nations_league_d",
         )
         for competition_key in active_generic_competitions:
             with self.subTest(competition_key=competition_key):

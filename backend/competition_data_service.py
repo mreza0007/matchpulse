@@ -84,19 +84,24 @@ COMPETITION_DATA_PROVIDERS = {
     },
 }
 
-def generic_football_provider(competition_key, season_key, supports_standings=True):
+def generic_football_provider(
+    competition_key,
+    season_key,
+    supports_standings=True,
+    competition_format="league",
+):
     season_provider = {
         "matches": partial(
             get_generic_season_matches,
             competition_key,
             season_key,
-            competition_format="league",
+            competition_format=competition_format,
         ),
         "overview": partial(
             get_generic_season_overview,
             competition_key,
             season_key,
-            competition_format="league",
+            competition_format=competition_format,
         ),
         "teams": partial(get_generic_season_teams, competition_key, season_key),
         "live": get_generic_match_live,
@@ -124,6 +129,19 @@ for _competition_key, _season_key, _supports_standings in (
         _competition_key,
         _season_key,
         supports_standings=_supports_standings,
+    )
+
+for _competition_key in (
+    "uefa_nations_league_a",
+    "uefa_nations_league_b",
+    "uefa_nations_league_c",
+    "uefa_nations_league_d",
+):
+    COMPETITION_DATA_PROVIDERS[_competition_key] = generic_football_provider(
+        _competition_key,
+        "2026-2027",
+        supports_standings=False,
+        competition_format="group_knockout",
     )
 
 

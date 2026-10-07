@@ -97,4 +97,24 @@ export const COMPETITIONS = {
     { fa: "لیگ اروپا", en: "UEFA Europa League" }, "UEL",
     "/competition-logos/europa-league.svg",
   ),
+  uefa_nations_league_a: genericCompetitionConfig(
+    "uefa_nations_league_a", "2026-2027",
+    { fa: "لیگ ملت‌های اروپا (A)", en: "UEFA Nations League A" }, "UNL A",
+    "/competition-logos/uefa-nations-league.png",
+  ),
+  uefa_nations_league_b: genericCompetitionConfig(
+    "uefa_nations_league_b", "2026-2027",
+    { fa: "لیگ ملت‌های اروپا (B)", en: "UEFA Nations League B" }, "UNL B",
+    "/competition-logos/uefa-nations-league.png",
+  ),
+  uefa_nations_league_c: genericCompetitionConfig(
+    "uefa_nations_league_c", "2026-2027",
+    { fa: "لیگ ملت‌های اروپا (C)", en: "UEFA Nations League C" }, "UNL C",
+    "/competition-logos/uefa-nations-league.png",
+  ),
+  uefa_nations_league_d: genericCompetitionConfig(
+    "uefa_nations_league_d", "2026-2027",
+    { fa: "لیگ ملت‌های اروپا (D)", en: "UEFA Nations League D" }, "UNL D",
+    "/competition-logos/uefa-nations-league.png",
+  ),
 };

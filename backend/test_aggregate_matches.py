@@ -90,6 +90,32 @@ class AggregateMatchRouteTests(unittest.TestCase):
         self.assertEqual([g["competition"]["key"] for g in result["groups"]], ["la_liga", "premier_league"])
         self.assertEqual(len(result["groups"][1]["matches"]), 20)
 
+    def test_nations_league_daily_group_reaches_home_and_live_contract(self):
+        group = daily_group("uefa_nations_league_a", "2026-2027")
+        group["competition"]["name"] = "UEFA Nations League A"
+        match = group["matches"][0]
+        match.update({
+            "id": "mp_match_france_italy",
+            "home_name_en": "France",
+            "away_name_en": "Italy",
+            "home_name_fa": "فرانسه",
+            "away_name_fa": "ایتالیا",
+            "home_logo": "france.png",
+            "away_logo": "italy.png",
+        })
+        result = self.request_daily(daily_payload([group]))
+        self.assertEqual(
+            result["groups"][0]["competition"]["key"],
+            "uefa_nations_league_a",
+        )
+        normalized = result["groups"][0]["matches"][0]
+        self.assertEqual(normalized["home_en"], "France")
+        self.assertEqual(normalized["away_en"], "Italy")
+        self.assertEqual(normalized["home_logo"], "france.png")
+        self.assertEqual(normalized["away_logo"], "italy.png")
+        self.assertNotIn("provider", normalized)
+        self.assertNotIn("external_match_id", normalized)
+
     def test_provider_failure_is_one_source_error_without_fallback(self):
         for error in (requests.Timeout("secret"), requests.HTTPError("private URL"), ValueError("bad json secret")):
             with self.subTest(error=type(error).__name__):

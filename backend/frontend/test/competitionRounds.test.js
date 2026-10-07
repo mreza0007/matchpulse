@@ -191,6 +191,7 @@ test("known competitions use local logos and the resolver retains safe fallback"
     "ligue-1.svg",
     "champions-league.svg",
     "europa-league.svg",
+    "uefa-nations-league.png",
   ].forEach((asset) => assert.match(config, new RegExp(asset.replace(".", "\\."))));
   assert.ok(config.indexOf("persian-gulf-pro-league.png") < config.indexOf('"PGPL"') + 200);
   assert.match(logo, /competition\.logo_url[\s\S]*trustedConfig\?\.logoSrc/);
@@ -198,6 +199,33 @@ test("known competitions use local logos and the resolver retains safe fallback"
   assert.match(logo, /trustedConfig\?\.logoFallback \|\| "⚽"/);
   assert.match(directory, /<CompetitionLogo competition=\{competition\} lang=\{lang\}/);
   assert.match(detail, /<CompetitionLogo competition=\{competition\} eager lang=\{lang\}/);
+});
+
+test("Nations League uses stage-aware rounds and the national-team directory category", () => {
+  const config = source("../src/config/competitions.js");
+  const categories = source("../src/config/competitionCategories.js");
+  const nationsLeague = {
+    competition_key: "uefa_nations_league_a",
+    format: "group_knockout",
+    supports_standings: false,
+  };
+  const model = buildCompetitionMatchScopes([
+    match("هفته ۳", "finished", -24),
+    match("هفته ۴", "upcoming", 24),
+  ], nationsLeague);
+
+  assert.equal(model.mode, "stage");
+  assert.deepEqual(model.scopes.map((scope) => scopeLabel(scope, "en")), [
+    "Round 3",
+    "Round 4",
+  ]);
+  assert.match(config, /uefa_nations_league_a:[\s\S]*uefa-nations-league\.png/);
+  for (const division of ["a", "b", "c", "d"]) {
+    assert.match(
+      categories,
+      new RegExp(`uefa_nations_league_${division}: "nationalCompetitions"`),
+    );
+  }
 });
 
 test("existing knockout bracket remains a separate unchanged data path", () => {
