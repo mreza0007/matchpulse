@@ -13,6 +13,7 @@ export const COMPETITION_CATEGORY_BY_KEY = {
   champions_league: "clubCompetitions",
   europa_league: "clubCompetitions",
   uefa_nations_league_a: "nationalCompetitions",
+  uefa_nations_league: "nationalCompetitions",
   uefa_nations_league_b: "nationalCompetitions",
   uefa_nations_league_c: "nationalCompetitions",
   uefa_nations_league_d: "nationalCompetitions",

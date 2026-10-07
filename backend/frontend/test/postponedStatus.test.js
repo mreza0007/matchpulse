@@ -91,7 +91,8 @@ test("MatchCard renders a neutral label without live, score, time, or reminder b
   assert.match(card, /matchStatus\.key === "postponed"/);
   assert.match(card, /className="match-status postponed"/);
   assert.match(card, /showReminder && !isPostponed/);
-  assert.match(card, /!isPostponed && <span>🕒/);
+  assert.match(card, /const showTimeMetadata = !isPostponed &&/);
+  assert.match(card, /showTimeMetadata && <span><UiIcon name="clock"/);
   assert.match(card, /\["upcoming", "pending_result", "postponed"\]\.includes/);
   assert.doesNotMatch(card, /match-status postponed live-pulse/);
   assert.match(css, /\.match-status\.postponed/);

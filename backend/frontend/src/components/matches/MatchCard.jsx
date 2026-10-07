@@ -1,4 +1,5 @@
 import { memo } from "react";
+import UiIcon from "../layout/UiIcon.jsx";
 import EventRow from "./EventRow.jsx";
 import TeamFlag from "../teams/TeamFlag.jsx";
 import { formatTehranMatchDateTime } from "../../utils/dates.js";
@@ -70,6 +71,8 @@ function MatchCard({
   const awayName = getLocalizedTeamName(match, "away", lang);
   const shouldShowScoreFallback = !matchScore && ["finished", "pending_result"].includes(matchStatus.key);
   const matchDateTime = formatTehranMatchDateTime(match, lang);
+  const showTimeMetadata = !isPostponed && !(showStatusSummary && matchStatus.key === "upcoming");
+  const hasMatchMetadata = showTimeMetadata || match.group || match.stadium || match.city;
   const canViewEvents = showEvents && canShowEvents(match);
   const predictionLocked = showPredictions && (predictionForceLocked || isPredictionLocked(match));
   const showPrediction = showPredictions && (isFutureMatchStatus(match) || Boolean(prediction));
@@ -111,7 +114,7 @@ function MatchCard({
       <div className="match-top">
         <div className="match-top-main">
           <span className="match-date">{matchDateTime.date}</span>
-          <span className="match-stage">{match.stage_label || match.stage}</span>
+          {(match.stage_label || match.stage) && <span className="match-stage">{match.stage_label || match.stage}</span>}
         </div>
         {isLive && variant !== "hero" && !showStatusSummary && (
           <span className="match-status live live-pulse">{matchStatus.label}</span>
@@ -155,20 +158,20 @@ function MatchCard({
         <PenaltySummary match={match} lang={lang} />
       </div>
 
-      <div className="match-meta-grid">
-        {!isPostponed && <span>🕒 {matchDateTime.time}</span>}
+      {hasMatchMetadata && <div className="match-meta-grid">
+        {showTimeMetadata && <span><UiIcon name="clock" /> {matchDateTime.time}</span>}
         {match.group && (
           <span>
-            🏆 {t.group} {match.group}
+            <UiIcon name="trophy" /> {t.group} {match.group}
           </span>
         )}
-        <span>🏟 {match.stadium}</span>
-        <span>📍 {match.city}</span>
-      </div>
+        {match.stadium && <span><UiIcon name="stadium" /> {match.stadium}</span>}
+        {match.city && <span><UiIcon name="location" /> {match.city}</span>}
+      </div>}
 
       {match.result && match.score_source !== "football-data.org" && (
         <div className="match-info">
-          <span>📊 {match.result}</span>
+          <span>{match.result}</span>
         </div>
       )}
 
@@ -213,9 +216,10 @@ function MatchCard({
           }}
           type="button"
         >
+          <UiIcon name="bell" />
           {isReminderPending
             ? t.reminderSaving
-            : (isReminderActive ? `🔕 ${t.cancelReminder}` : `🔔 ${t.remind}`)}
+            : (isReminderActive ? t.cancelReminder : t.remind)}
         </button>
       )}
 

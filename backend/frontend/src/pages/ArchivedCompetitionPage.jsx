@@ -3,6 +3,7 @@ import { fetchWorldCupSummary } from "../api/football.js";
 import CompetitionLogo from "../components/competitions/CompetitionLogo.jsx";
 import WorldCupArchive from "../components/worldcup/WorldCupArchive.jsx";
 import { getCompetitionName } from "../utils/competitions.js";
+import { formatSeasonLabel } from "../utils/competitionPresentation.js";
 
 export default function ArchivedCompetitionPage({ competition, lang, onBack, t }) {
   const [summary, setSummary] = useState(null);
@@ -44,7 +45,7 @@ export default function ArchivedCompetitionPage({ competition, lang, onBack, t }
         <div>
           <p className="eyebrow">{t.worldcupArchiveSubtitle}</p>
           <h1>{getCompetitionName(competition, lang)}</h1>
-          {competition.season_key && <p>{t.season}: {competition.season_key}</p>}
+          {competition.season_key && <p>{t.season}: <bdi dir="ltr">{formatSeasonLabel(competition.season_key)}</bdi></p>}
         </div>
       </div>
 

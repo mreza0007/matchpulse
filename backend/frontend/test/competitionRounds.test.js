@@ -198,7 +198,7 @@ test("known competitions use local logos and the resolver retains safe fallback"
   assert.match(logo, /onError=\{\(\) => setFailedSrc\(logoSrc\)\}/);
   assert.match(logo, /trustedConfig\?\.logoFallback \|\| "⚽"/);
   assert.match(directory, /<CompetitionLogo competition=\{competition\} lang=\{lang\}/);
-  assert.match(detail, /<CompetitionLogo competition=\{competition\} eager lang=\{lang\}/);
+  assert.match(detail, /<CompetitionLogo competition=\{presentation\} eager lang=\{lang\}/);
 });
 
 test("Nations League uses stage-aware rounds and the national-team directory category", () => {

@@ -13,6 +13,7 @@ import PredictionHistoryItem from "../components/predictions/PredictionHistoryIt
 import PredictionLeaderboard from "../components/predictions/PredictionLeaderboard.jsx";
 import PredictionMatchCard from "../components/predictions/PredictionMatchCard.jsx";
 import { getCompetitionName } from "../utils/competitions.js";
+import { formatSeasonLabel } from "../utils/competitionPresentation.js";
 
 const EMPTY_STATS = { points: 0, correct: 0, wrong: 0, pending: 0, total: 0 };
 
@@ -487,7 +488,7 @@ export default function PredictionsPage({ lang, t, telegramId }) {
               <CompetitionLogo competition={competition} />
               <span>
                 <strong>{getCompetitionName(competition, lang)}</strong>
-                <small>{t.season}: {competition.season_key}</small>
+                <small>{t.season}: <bdi dir="ltr">{formatSeasonLabel(competition.season_key)}</bdi></small>
               </span>
             </button>
           ))}

@@ -51,13 +51,10 @@ import {
   isCurrentEventRequest,
 } from "../utils/events.js";
 import ArchivedCompetitionPage from "./ArchivedCompetitionPage.jsx";
+import { competitionTabs, formatSeasonLabel } from "../utils/competitionPresentation.js";
+import { scopeLabel } from "../utils/competitionRounds.js";
 
 const EMPTY_SET = new Set();
-const FORMAT_TABS = {
-  league: ["overview", "matches", "standings", "stats", "teams"],
-  group_knockout: ["overview", "matches", "groups", "knockout", "stats", "teams"],
-  knockout_only: ["overview", "matches", "knockout", "stats", "teams"],
-};
 const INITIAL_OVERVIEW_MATCHES = { items: [], loading: true, loaded: false, failed: false };
 const INITIAL_FULL_MATCHES = {
   items: [],
@@ -173,6 +170,9 @@ function teamName(team, lang) {
 
 function ActiveCompetitionPage({
   competition,
+  presentation = competition,
+  divisionSelector,
+  divisionLabel,
   favoriteIdentityKeys,
   favoriteMessage,
   favoritePendingKeys,
@@ -192,17 +192,10 @@ function ActiveCompetitionPage({
   const canAddReminders = supportsNewCompetitionAction(
     competition, "supports_reminders",
   );
-  const isLeague = (
-    competition.format === "league"
-    && competition.supports_standings === true
-  );
-  const isGroupKnockout = competition.format === "group_knockout";
-  const hasKnockoutTab = isGroupKnockout || competition.format === "knockout_only";
-  const tabs = (FORMAT_TABS[competition.format] || []).filter((tab) => (
-    (tab !== "standings" || competition.supports_standings === true)
-    && (tab !== "groups" || competition.supports_groups === true)
-    && (tab !== "knockout" || competition.supports_knockout === true)
-  ));
+  const isLeague = competition.supports_standings === true;
+  const isGroupKnockout = competition.supports_groups === true;
+  const hasKnockoutTab = competition.supports_knockout === true;
+  const tabs = competitionTabs(competition);
   const [activeTab, setActiveTab] = useState("overview");
   const [overviewMatches, setOverviewMatches] = useState(INITIAL_OVERVIEW_MATCHES);
   const [fullMatches, setFullMatches] = useState(INITIAL_FULL_MATCHES);
@@ -520,11 +513,15 @@ function ActiveCompetitionPage({
     () => overviewMatch(overviewMatches.items),
     [overviewMatches.items],
   );
+  const overviewScope = useMemo(() => {
+    const model = buildCompetitionMatchScopes(overviewMatches.items, competition);
+    const relevant = selectRelevantRound(model.scopes);
+    return model.scopes.find((scope) => scope.key === relevant.scopeKey);
+  }, [overviewMatches.items, competition]);
   const previewMatches = useMemo(
     () => overviewMatches.items
       .filter((match) => match !== primaryMatch)
-      .filter((match) => isLiveMatch(match) || isFutureMatchStatus(match) || isResultTabMatch(match))
-      .slice(0, 3),
+      .filter((match) => isLiveMatch(match) || isFutureMatchStatus(match) || isResultTabMatch(match)),
     [overviewMatches.items, primaryMatch],
   );
   const toggleMatchEvents = (match) => {
@@ -724,17 +721,21 @@ function ActiveCompetitionPage({
             )}
           </section>
         )}
-        {previewMatches.length > 0 && (
-          <section className="competition-preview-section">
-            <h2>{t.recentUpcomingMatches}</h2>
+        {[
+          { title: t.liveMatches, items: previewMatches.filter(isLiveMatch) },
+          { title: t.homeNextMatches, items: previewMatches.filter(isFutureMatchStatus) },
+          { title: t.latestResults, items: previewMatches.filter(isResultTabMatch) },
+        ].filter((section) => section.items.length > 0).map((section) => (
+          <section className="competition-preview-section" key={section.title}>
+            <h2>{section.title}</h2>
             <div className="competition-preview-matches">
-              {previewMatches.map((match, index) => renderDisplayMatchCard(
+              {section.items.slice(0, 3).map((match, index) => renderDisplayMatchCard(
                 match,
                 `${competition.competition_key}:${match.id ?? index}`,
               ))}
             </div>
           </section>
-        )}
+        ))}
       </>
     );
   };
@@ -789,6 +790,13 @@ function ActiveCompetitionPage({
 
   const renderOverview = () => (
     <div className="competition-overview-content">
+      {(divisionLabel || overviewScope || teams.loaded) && (
+        <div className="competition-overview-summary">
+          {divisionLabel && <span>{divisionLabel}</span>}
+          {overviewScope && <span>{scopeLabel(overviewScope, lang)}</span>}
+          {teams.loaded && <span>{t.teams}: {teams.items.length}</span>}
+        </div>
+      )}
       {renderOverviewMatches()}
       {renderStandingsPreview()}
       {renderGroupsPreview()}
@@ -960,12 +968,13 @@ function ActiveCompetitionPage({
       </button>
 
       <div className="competition-detail-identity">
-        <CompetitionLogo competition={competition} eager lang={lang} />
+        <CompetitionLogo competition={presentation} eager lang={lang} />
         <div>
-          <h1>{getCompetitionName(competition, lang)}</h1>
-          {competition.season_key && <p>{t.season}: {competition.season_key}</p>}
+          <h1>{getCompetitionName(presentation, lang)}</h1>
+          {competition.season_key && <p>{t.season}: <bdi dir="ltr">{formatSeasonLabel(competition.season_key)}</bdi></p>}
         </div>
       </div>
+      {divisionSelector}
 
       {reminderMessage && <p className="status-message">{reminderMessage}</p>}
       {tabs.length > 0 ? (

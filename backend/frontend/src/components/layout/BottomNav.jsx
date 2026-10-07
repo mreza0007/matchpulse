@@ -1,14 +1,16 @@
+import UiIcon from "./UiIcon.jsx";
+
 const NAV_ITEMS = [
-  { key: "home", icon: "⌂", label: "خانه" },
-  { key: "live", icon: "●", label: "زنده" },
-  { key: "competitions", icon: "⚽", label: "مسابقات" },
-  { key: "news", icon: "▤", label: "اخبار" },
-  { key: "predictions", icon: "✓", label: "پیش‌بینی" },
+  { key: "home", icon: "home", label: "home" },
+  { key: "live", icon: "live", label: "live" },
+  { key: "competitions", icon: "trophy", label: "competitionsPage" },
+  { key: "news", icon: "news", label: "news" },
+  { key: "predictions", icon: "check", label: "prediction" },
 ];
 
-export default function BottomNav({ activeTab, onChange }) {
+export default function BottomNav({ activeTab, onChange, t, lang }) {
   return (
-    <nav className="bottom-nav" aria-label="ناوبری اصلی">
+    <nav className="bottom-nav" aria-label={lang === "fa" ? "ناوبری اصلی" : "Main navigation"}>
       {NAV_ITEMS.map((item) => (
         <button
           aria-current={activeTab === item.key ? "page" : undefined}
@@ -17,8 +19,8 @@ export default function BottomNav({ activeTab, onChange }) {
           onClick={() => onChange(item.key)}
           type="button"
         >
-          <span aria-hidden="true">{item.icon}</span>
-          <small>{item.label}</small>
+          <span aria-hidden="true"><UiIcon name={item.icon} /></span>
+          <small>{t[item.label]}</small>
         </button>
       ))}
     </nav>

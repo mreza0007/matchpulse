@@ -7,6 +7,12 @@ import {
 import CompetitionLogo from "../components/competitions/CompetitionLogo.jsx";
 import { getCompetitionName } from "../utils/competitions.js";
 import CompetitionPage from "./CompetitionPage.jsx";
+import NationsLeaguePage from "../components/competitions/NationsLeaguePage.jsx";
+import {
+  formatSeasonLabel,
+  groupCompetitionDirectory,
+  isNationsLeague,
+} from "../utils/competitionPresentation.js";
 
 function CompetitionListSkeleton() {
   return (
@@ -30,12 +36,17 @@ export default function CompetitionsPage({
   onFavoriteToggle,
   t,
   telegramId,
+  initialCompetitionKey = "",
 }) {
   const [competitions, setCompetitions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [retryVersion, setRetryVersion] = useState(0);
-  const [selectedCompetition, setSelectedCompetition] = useState(null);
+  const [selectedKey, setSelectedKey] = useState(initialCompetitionKey);
+  const directory = useMemo(() => groupCompetitionDirectory(competitions), [competitions]);
+  const selectedCompetition = isNationsLeague(selectedKey)
+    ? directory.find((item) => item.competition_key === "uefa_nations_league")
+    : competitions.find((item) => item.competition_key === selectedKey);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -64,7 +75,7 @@ export default function CompetitionsPage({
   const categories = useMemo(() => {
     const grouped = Object.fromEntries(COMPETITION_CATEGORY_ORDER.map((key) => [key, []]));
 
-    competitions.forEach((competition) => {
+    directory.forEach((competition) => {
       const category = COMPETITION_CATEGORY_BY_KEY[competition?.competition_key];
       if (category && grouped[category]) grouped[category].push(competition);
     });
@@ -72,7 +83,7 @@ export default function CompetitionsPage({
     return COMPETITION_CATEGORY_ORDER
       .map((key) => ({ key, competitions: grouped[key] }))
       .filter((category) => category.competitions.length > 0);
-  }, [competitions]);
+  }, [directory]);
 
   const retry = () => {
     setHasError(false);
@@ -81,8 +92,11 @@ export default function CompetitionsPage({
   };
 
   if (selectedCompetition) {
+    const SelectedPage = isNationsLeague(selectedKey) ? NationsLeaguePage : CompetitionPage;
     return (
-      <CompetitionPage
+      <SelectedPage
+        divisions={selectedCompetition.divisions}
+        initialKey={selectedKey}
         onReminderToggle={onReminderToggle}
         reminderIdentityKeys={reminderIdentityKeys}
         reminderMessage={reminderMessage}
@@ -93,7 +107,7 @@ export default function CompetitionsPage({
         favoritePendingKeys={favoritePendingKeys}
         key={`${selectedCompetition.competition_key}:${selectedCompetition.season_key || ""}`}
         lang={lang}
-        onBack={() => setSelectedCompetition(null)}
+        onBack={() => setSelectedKey("")}
         onFavoriteToggle={onFavoriteToggle}
         t={t}
         telegramId={telegramId}
@@ -126,13 +140,13 @@ export default function CompetitionsPage({
               <button
                 className="competition-directory-row"
                 key={competition.competition_key}
-                onClick={() => setSelectedCompetition(competition)}
+                onClick={() => setSelectedKey(competition.competition_key)}
                 type="button"
               >
                 <CompetitionLogo competition={competition} lang={lang} />
                 <span className="competition-directory-copy">
                   <strong>{getCompetitionName(competition, lang)}</strong>
-                  {competition.season_key && <small>{t.season}: {competition.season_key}</small>}
+                  {competition.season_key && <small>{t.season}: <bdi dir="ltr">{formatSeasonLabel(competition.season_key)}</bdi></small>}
                 </span>
                 <span className="competition-directory-chevron" aria-hidden="true">‹</span>
               </button>

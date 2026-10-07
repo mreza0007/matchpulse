@@ -4,6 +4,7 @@ import { groupActiveCompetitionFavorites } from "../utils/competitionCapabilitie
 import { formatTehranMatchDateTime } from "../utils/dates.js";
 import { reminderIdentityKeyFromRecord } from "../utils/reminders.js";
 import { getLocalizedTeamName } from "../utils/teams.js";
+import { formatSeasonLabel } from "../utils/competitionPresentation.js";
 
 function FavoriteGroup({ favorites, isPending, lang, onRemove, t, title }) {
   return (
@@ -159,7 +160,7 @@ export default function ProfilePage({
             const awayName = getLocalizedTeamName(match, "away", lang);
             const competitionContext = [
               String(match?.competition_key || "").replaceAll("_", " "),
-              match?.season_key,
+              formatSeasonLabel(match?.season_key),
             ].filter(Boolean).join(" · ");
             return (
               <div className="profile-item reminder-item" key={reminderKey}>
@@ -173,7 +174,7 @@ export default function ProfilePage({
                       {awayName}
                     </span>
                   </strong>
-                  <small>{competitionContext}</small>
+                  <small><bdi>{competitionContext}</bdi></small>
                   <small>{reminderDateTime.compact}</small>
                 </div>
                 {canRemoveReminders && (

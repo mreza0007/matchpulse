@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import { COMPETITIONS } from "./config/competitions.js";
 import { translations } from "./config/translations.js";
+import { competitionNavigationKey } from "./utils/competitionPresentation.js";
 import {
   fetchCompetitionMatches,
   fetchCompetitionTeams,
@@ -96,7 +97,8 @@ function favoriteFailureStatus(status) {
 function App() {
   const initialTelegramUser = window.Telegram?.WebApp?.initDataUnsafe?.user || null;
   const [lang, setLang] = useState("fa");
-  const [activeTab, setActiveTab] = useState("home");
+  const [initialCompetitionKey] = useState(() => competitionNavigationKey(window.location));
+  const [activeTab, setActiveTab] = useState(initialCompetitionKey ? "competitions" : "home");
   const [selectedCompetitionKey, setSelectedCompetitionKey] = useState("worldcup2026");
   const [telegramUser] = useState(initialTelegramUser);
   const [isUserSaved, setIsUserSaved] = useState(false);
@@ -1065,6 +1067,7 @@ function App() {
 
       {activeTab === "competitions" && (
         <CompetitionsPage
+          initialCompetitionKey={initialCompetitionKey}
           favoriteMessage={favoriteMessage}
           favoriteIdentityKeys={favoriteIdentityKeys}
           favoritePendingKeys={favoritePendingKeys}
@@ -1177,7 +1180,7 @@ function App() {
         />
       )}
 
-      <BottomNav activeTab={activeTab} onChange={setActiveTab} />
+      <BottomNav activeTab={activeTab} onChange={setActiveTab} t={t} lang={lang} />
     </main>
   );
 }
