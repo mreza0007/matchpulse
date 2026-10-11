@@ -808,6 +808,14 @@ def save_reminder(data: ReminderData):
             request["season_key"],
         )
         user_reminders = get_reminders_from_db(data.telegram_id)
+        if not created and any(
+            row.get("notified")
+            and row.get("competition_key") == request["competition_key"]
+            and row.get("season_key") == request["season_key"]
+            and str(row.get("match_id")) == request["match_id"]
+            for row in user_reminders
+        ):
+            raise HTTPException(status_code=409, detail="Reminder already delivered")
     except (RuntimeError, sqlite3.Error) as error:
         raise HTTPException(status_code=503, detail="Reminder storage unavailable") from error
 
@@ -822,12 +830,16 @@ def save_reminder(data: ReminderData):
 
 
 @api.get("/reminders/{telegram_id}")
-def get_reminders(telegram_id: int):
+def get_reminders(telegram_id: int, view: str = Query("all", pattern="^(all|active)$")):
     try:
         user_reminders = get_reminders_from_db(telegram_id)
     except (RuntimeError, sqlite3.Error) as error:
         raise HTTPException(status_code=503, detail="Reminder storage unavailable") from error
     reminders[telegram_id] = user_reminders
+
+    if view == "active":
+        from reminder_lifecycle_service import refresh_active_reminders
+        user_reminders = refresh_active_reminders(telegram_id, user_reminders)
 
     return {
         "telegram_id": telegram_id,

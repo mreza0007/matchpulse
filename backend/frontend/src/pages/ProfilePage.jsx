@@ -2,7 +2,7 @@ import FavoriteTeamItem from "../components/profile/FavoriteTeamItem.jsx";
 import TeamFlag from "../components/teams/TeamFlag.jsx";
 import { groupActiveCompetitionFavorites } from "../utils/competitionCapabilities.js";
 import { formatTehranMatchDateTime } from "../utils/dates.js";
-import { reminderIdentityKeyFromRecord } from "../utils/reminders.js";
+import { isActiveReminder, reminderIdentityKeyFromRecord } from "../utils/reminders.js";
 import { getLocalizedTeamName } from "../utils/teams.js";
 import { formatSeasonLabel } from "../utils/competitionPresentation.js";
 
@@ -37,6 +37,7 @@ export default function ProfilePage({
   isUserSaved,
   lang,
   onRemoveFavorite,
+  onChooseFavorites,
   onRemoveReminder,
   predictionStats,
   reminders,
@@ -45,6 +46,7 @@ export default function ProfilePage({
   t,
   telegramUser,
 }) {
+  const activeReminders = reminders.filter((reminder) => isActiveReminder(reminder));
   const profileName = telegramUser
     ? `${telegramUser.first_name || ""} ${telegramUser.last_name || ""}`.trim()
     : t.profileTitle;
@@ -129,7 +131,7 @@ export default function ProfilePage({
           {showResolutionNotice && (
             <p className="profile-favorite-notice">{t.favoriteResolutionNotice}</p>
           )}
-          {favoriteStatus === "ready" && activeFavoriteCount === 0 && <p>{t.noFavorites}</p>}
+          {favoriteStatus === "ready" && activeFavoriteCount === 0 && <div className="home-empty-state"><p>{t.noFavorites}</p><button type="button" onClick={onChooseFavorites}>{t.chooseFavoriteTeams}</button></div>}
 
           {favoriteGroups.map((group) => (
             <FavoriteGroup
@@ -147,11 +149,11 @@ export default function ProfilePage({
         <div className="profile-list">
           <div className="profile-list-header">
             <h3>🔔 {t.activeReminders}</h3>
-            <span>{reminders.length}</span>
+            <span>{activeReminders.length}</span>
           </div>
-          {reminders.length === 0 && <p>{t.noReminders}</p>}
+          {activeReminders.length === 0 && <p>{t.noReminders}</p>}
           {reminderMessage && <p className="status-message">{reminderMessage}</p>}
-          {reminders.map((match, index) => {
+          {activeReminders.map((match, index) => {
             const reminderDateTime = formatTehranMatchDateTime(match, lang);
             const identityKey = reminderIdentityKeyFromRecord(match);
             const reminderKey = identityKey || `malformed-reminder:${index}`;
@@ -164,13 +166,13 @@ export default function ProfilePage({
             ].filter(Boolean).join(" · ");
             return (
               <div className="profile-item reminder-item" key={reminderKey}>
-                <TeamFlag flagEmoji={match?.home_flag} teamName={homeName} />
+                <TeamFlag flagEmoji={match?.home_flag} logoUrl={match?.home_logo} teamName={homeName} />
                 <div className="profile-item-text">
                   <strong>
                     <span className="profile-reminder-match">
                       {homeName}
                       <span>{t.vs}</span>
-                      <TeamFlag flagEmoji={match?.away_flag} teamName={awayName} />
+                      <TeamFlag flagEmoji={match?.away_flag} logoUrl={match?.away_logo} teamName={awayName} />
                       {awayName}
                     </span>
                   </strong>

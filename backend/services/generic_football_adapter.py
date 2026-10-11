@@ -441,20 +441,12 @@ def _event_minute_parts(event):
 
 
 def _normalize_event_type(event):
+    from event_semantics import confirmed_disallowed_goal
+    if confirmed_disallowed_goal(event):
+        return "disallowed_goal"
     raw_type = _first_event_text(event, "type", "normalized_type", "event_type")
     normalized = str(raw_type or "").strip().lower()
     normalized = EVENT_TYPE_ALIASES.get(normalized, normalized)
-    if normalized == "var":
-        evidence = " ".join(
-            value.lower()
-            for value in (
-                _first_event_text(event, "raw_type_label"),
-                _first_event_text(event, "description"),
-            )
-            if value
-        )
-        if "goal disallowed" in evidence or "disallowed goal" in evidence:
-            return "disallowed_goal"
     return normalized if normalized in EVENT_TYPES else "other"
 
 

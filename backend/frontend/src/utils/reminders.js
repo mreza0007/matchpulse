@@ -89,7 +89,13 @@ export function isReminderEligibleMatch(match, now = Date.now()) {
   const kickoff = normalizeText(match?.kickoff_utc);
   if (!/(?:z|[+-]00:00)$/i.test(kickoff)) return false;
   const kickoffTime = Date.parse(kickoff);
-  return Number.isFinite(kickoffTime) && kickoffTime > now;
+  return Number.isFinite(kickoffTime) && kickoffTime - 60 * 60 * 1000 > now;
+}
+
+export function isActiveReminder(reminder, now = Date.now()) {
+  return reminder?.competition_key !== "worldcup2026"
+    && !reminder?.notified && reminder?.reminder_state !== "retired"
+    && isReminderEligibleMatch(reminder, now);
 }
 
 export function reminderErrorTranslationKey(status) {

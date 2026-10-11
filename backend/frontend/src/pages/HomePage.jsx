@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useCompetitionMetadata } from "../hooks/useCompetitionMetadata.js";
 import { useDailyMatches, useTehranCalendarDates } from "../hooks/useDailyMatches.js";
 import { useScopedMatchEvents } from "../hooks/useScopedMatchEvents.js";
 import CompetitionMatchGroup from "../components/competitions/CompetitionMatchGroup.jsx";
@@ -54,7 +55,8 @@ function DateMatchSection({ label, groups, lang, renderMatch }) {
   );
 }
 
-export default function HomePage({ lang, t }) {
+export default function HomePage({ lang, t, favoriteProps }) {
+  const competitions = useCompetitionMetadata();
   const dates = useTehranCalendarDates();
   const today = useDailyMatches(dates.today);
   const tomorrow = useDailyMatches(dates.tomorrow);
@@ -73,6 +75,8 @@ export default function HomePage({ lang, t }) {
   const renderMatch = (match, competition, variant = "standard") => (
     <MatchCard
       awayLogo={match.away_logo || ""}
+      {...favoriteProps}
+      competition={competitions[competition?.key || match.competition_key]}
       favoriteTeamIds={EMPTY_SET}
       favoriteTeamKeys={EMPTY_SET}
       homeLogo={match.home_logo || ""}
@@ -80,7 +84,7 @@ export default function HomePage({ lang, t }) {
       lang={lang}
       match={match}
       {...matchEvents.eventProps(match)}
-      showFavorites={false}
+      showFavorites={Boolean(competitions[competition?.key || match.competition_key])}
       showPredictions={false}
       showReminder={false}
       t={t}

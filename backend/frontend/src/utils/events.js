@@ -11,8 +11,8 @@ const EVENT_LABELS = {
     penalty_goal: "\u06af\u0644 \u067e\u0646\u0627\u0644\u062a\u06cc",
     penalty_event: "\u0631\u0648\u06cc\u062f\u0627\u062f \u067e\u0646\u0627\u0644\u062a\u06cc",
     own_goal: "\u06af\u0644 \u0628\u0647 \u062e\u0648\u062f\u06cc",
-    var_disallowed_goal: "\u06af\u0644 \u0645\u0631\u062f\u0648\u062f \u0628\u0627 VAR",
-    disallowed_goal: "\u06af\u0644 \u0645\u0631\u062f\u0648\u062f \u0628\u0627 VAR",
+    var_disallowed_goal: "گل مردود شده",
+    disallowed_goal: "گل مردود شده",
     penalty_missed: "\u067e\u0646\u0627\u0644\u062a\u06cc \u062e\u0631\u0627\u0628\u200c\u0634\u062f\u0647",
     missed_penalty: "\u067e\u0646\u0627\u0644\u062a\u06cc \u062e\u0631\u0627\u0628\u200c\u0634\u062f\u0647",
     assist: "\u067e\u0627\u0633 \u06af\u0644",
@@ -32,8 +32,8 @@ const EVENT_LABELS = {
     penalty_goal: "Penalty goal",
     penalty_event: "Penalty event",
     own_goal: "Own goal",
-    var_disallowed_goal: "VAR-disallowed goal",
-    disallowed_goal: "VAR-disallowed goal",
+    var_disallowed_goal: "Disallowed goal",
+    disallowed_goal: "Disallowed goal",
     penalty_missed: "Missed penalty",
     missed_penalty: "Missed penalty",
     assist: "Assist",
@@ -138,6 +138,9 @@ export function getEventPlayer(event) {
 }
 
 export function getNormalizedEventType(event) {
+  const confirmed = ["description", "raw_type_label", "decisionTitle", "decision", "outcome"]
+    .some((field) => /^(?:(?:goal disallowed|disallowed goal|goal overturned|overturned goal)(?: after var review)?|گل\s+(?:مردود(?:\s+شده)?|رد\s+شده))[.!]?$/i.test(String(event?.[field] || "").trim()));
+  if (confirmed) return "disallowed_goal";
   return String(event?.normalized_type || event?.event_type || event?.type || "unknown").toLowerCase();
 }
 

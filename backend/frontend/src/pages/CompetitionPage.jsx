@@ -103,6 +103,10 @@ function RetryState({ message, onRetry, t }) {
 }
 
 function DisplayMatchCard({
+  favoriteIdentityKeys,
+  favoritePendingKeys,
+  onFavoriteToggle,
+  telegramId,
   canAddReminders,
   competition,
   eventIdentityKey,
@@ -127,6 +131,11 @@ function DisplayMatchCard({
   return (
     <MatchCard
       awayLogo={match.away_logo || ""}
+      competition={competition}
+      favoriteIdentityKeys={favoriteIdentityKeys}
+      favoritePendingKeys={favoritePendingKeys}
+      favoritesDisabled={!telegramId}
+      onFavoriteToggle={onFavoriteToggle}
       favoriteTeamIds={EMPTY_SET}
       favoriteTeamKeys={EMPTY_SET}
       homeLogo={match.home_logo || ""}
@@ -142,7 +151,7 @@ function DisplayMatchCard({
       onDetailsClick={onEventToggle}
       onReminderToggle={(selectedMatch) => onReminderToggle(competition, selectedMatch)}
       showEvents={Boolean(eventIdentityKey && canShowCompetitionEvents(competition, match))}
-      showFavorites={false}
+      showFavorites
       showPredictions={false}
       showReminder={showReminder}
       showStatusSummary
@@ -639,6 +648,10 @@ function ActiveCompetitionPage({
 
     return (
       <DisplayMatchCard
+        favoriteIdentityKeys={favoriteIdentityKeys}
+        favoritePendingKeys={favoritePendingKeys}
+        onFavoriteToggle={onFavoriteToggle}
+        telegramId={telegramId}
         canAddReminders={canAddReminders}
         competition={competition}
         eventIdentityKey={eventIdentityKey}
@@ -874,7 +887,8 @@ function ActiveCompetitionPage({
               <strong>{teamName(team, lang)}</strong>
               {showFavoriteAction && (
                 <button
-                  aria-label={isFavorite ? t.removeFavorite : t.addFavorite}
+                  aria-label={`${isFavorite ? t.removeFavorite : t.addFavorite}: ${teamName(team, lang)}`}
+                  aria-busy={isPending}
                   aria-pressed={isFavorite}
                   className={`competition-team-favorite ${isFavorite ? "active" : ""}`}
                   disabled={!telegramId || isPending}

@@ -184,14 +184,15 @@ test("World Cup archive cannot render a new reminder action", () => {
 test("Profile retains context and deletes the exact stored reminder", () => {
   const profilePage = source("../src/pages/ProfilePage.jsx");
 
-  assert.match(profilePage, /reminders\.map\(\(match, index\) =>/);
+  assert.match(profilePage, /activeReminders\.map\(\(match, index\) =>/);
   assert.match(profilePage, /reminderIdentityKeyFromRecord\(match\)/);
   assert.match(profilePage, /match\?\.competition_key/);
   assert.match(profilePage, /match\?\.season_key/);
   assert.match(profilePage, /malformed-reminder:\$\{index\}/);
   assert.match(profilePage, /disabled=\{!identityKey \|\| isReminderPending\}/);
   assert.match(profilePage, /onRemoveReminder\(match\)/);
-  assert.doesNotMatch(profilePage, /filter.*reminder|supports_reminders/);
+  assert.match(profilePage, /isActiveReminder\(reminder\)/);
+  assert.doesNotMatch(profilePage, /supports_reminders/);
 });
 
 test("exact-key mutation lock blocks double clicks and allows parallel scopes", () => {

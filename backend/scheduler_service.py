@@ -770,10 +770,15 @@ def match_is_halftime(match):
 
 
 def live_event_type(event):
+    from event_semantics import confirmed_disallowed_goal
+    if confirmed_disallowed_goal(event):
+        return "disallowed_goal"
     return clean_value(event.get("normalized_type") or event.get("event_type") or event.get("type")).lower().replace("-", "_")
 
 
 def is_scoring_event(event):
+    if live_event_type(event) in {"var", "disallowed_goal", "var_disallowed_goal"}:
+        return False
     explicit = event.get("is_scoring_event")
 
     if explicit is True or str(explicit).strip().lower() in {"true", "1", "yes"}:
@@ -1559,7 +1564,7 @@ def seed_existing_match_notification_state():
         events = load_events(match_id_value)
         goal_events = [
             event for event in events
-            if (event.get("normalized_type") or event.get("type")) == "goal"
+            if live_event_type(event) == "goal"
         ]
 
         for index, event in enumerate(goal_events):
@@ -1630,10 +1635,14 @@ def reminder_in_delivery_window(match, now=None):
 
 
 def send_manual_reminder(bot_app, telegram_id, match, identity, now=None):
+    if match.get("reminder_state") == "retired":
+        return
     if match.get("notified"):
         return False
 
     if is_legacy_worldcup_reminder(identity):
+        if normalized_status(match) in {"live", "finished", "cancelled", "canceled", "postponed", "suspended"}:
+            return False
         if not should_notify(match, now=now):
             return False
         message_builder = build_match_message
@@ -1726,6 +1735,8 @@ def refresh_generic_reminder_group(scope, entries, now=None):
         refreshed["match_id"] = identity[3]
         refreshed["id"] = identity[3]
         refreshed["notified"] = False
+        from reminder_lifecycle_service import lifecycle_snapshot
+        refreshed = lifecycle_snapshot(refreshed, now)
         if reminder_snapshot_changed(reminder, refreshed):
             try:
                 updated = update_reminder_snapshot(
@@ -1762,7 +1773,7 @@ def check_manual_reminders(now=None):
     legacy_entries = []
     for telegram_id, user_reminders in list(reminders.items()):
         for match in user_reminders:
-            if match.get("notified"):
+            if match.get("notified") or match.get("reminder_state") == "retired":
                 continue
             identity = reminder_identity(telegram_id, match)
             if identity is None:
@@ -1773,6 +1784,18 @@ def check_manual_reminders(now=None):
                 continue
             entry = (telegram_id, match, identity)
             if is_legacy_worldcup_reminder(identity):
+                kickoff = parse_kickoff(match)
+                current = now or datetime.now(timezone.utc)
+                terminal = normalized_status(match) in {"live", "finished", "cancelled", "canceled", "postponed", "suspended"}
+                expired = kickoff is not None and kickoff - timedelta(minutes=55) < current
+                if terminal or expired:
+                    retired = {**match, "reminder_state": "retired", "retirement_reason": "match_ineligible" if terminal else "trigger_expired"}
+                    try:
+                        if update_reminder_snapshot(telegram_id, identity[3], identity[1], identity[2], retired):
+                            match.update(retired)
+                    except Exception:
+                        print(f"Reminder retirement unavailable: {manual_reminder_key(identity)}")
+                    continue
                 legacy_entries.append(entry)
             else:
                 generic_groups.setdefault(identity[1:3], []).append(entry)
@@ -1849,7 +1872,7 @@ def check_favorite_goal_notifications():
         events = load_events(match_id_value)
         goal_events = [
             event for event in events
-            if (event.get("normalized_type") or event.get("type")) == "goal"
+            if live_event_type(event) == "goal"
         ]
 
         if not goal_events:

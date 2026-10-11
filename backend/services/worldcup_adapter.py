@@ -20,7 +20,7 @@ VARZESH_EVENT_TYPES = {
     2: "yellow_card",
     3: "penalty_event",
     4: "substitution",
-    5: "var_disallowed_goal",
+    5: "var",
     6: "var",
     7: "own_goal",
     8: "red_card",
@@ -1696,14 +1696,12 @@ def normalize_event_type(event):
     raw_event_type = coerce_int(first_layer_value(("eventType", "raw_type")))
     card_type = coerce_int(first_layer_value(("cardType", "card_type")))
 
-    if (
-        raw_event_type == 5
-        or "گل رد شده" in text
-        or ("گل" in text and "مردود" in text)
-        or ("گل" in text and "کمک داور ویدیویی" in text)
-        or ("goal" in text and ("disallowed" in text or "disallow" in text))
-    ):
+    from event_semantics import confirmed_disallowed_goal
+    if any(confirmed_disallowed_goal(layer) for layer in event_layers()):
         return "var_disallowed_goal"
+
+    if raw_event_type in {5, 6}:
+        return "var"
 
     if card_type == 3 or "کارت قرمز" in text or "red card" in text:
         return "red_card"

@@ -18,7 +18,7 @@ export function saveTelegramUser(telegramId, telegramUser) {
 }
 
 export function fetchReminders(telegramId) {
-  return request(`${API_BASE_URL}/reminders/${telegramId}`);
+  return request(`${API_BASE_URL}/reminders/${telegramId}?view=active`);
 }
 
 export function fetchPredictions(telegramId) {

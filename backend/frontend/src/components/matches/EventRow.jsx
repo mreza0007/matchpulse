@@ -23,8 +23,10 @@ export default function EventRow({ event, match, lang, t, index }) {
     ["player_out_name", "player_out", "playerOut", "out_player"],
   );
   const providedLabel = lang === "fa" ? event.label_fa : event.label_en;
-  const title = providedLabel || getEventTypeLabel(type, lang);
-  const eventIcon = event.icon || getRenderedEventIcon(type);
+  const title = ["var", "disallowed_goal", "var_disallowed_goal"].includes(type)
+    ? getEventTypeLabel(type, lang) : providedLabel || getEventTypeLabel(type, lang);
+  const eventIcon = ["var", "disallowed_goal", "var_disallowed_goal"].includes(type)
+    ? getRenderedEventIcon(type) : event.icon || getRenderedEventIcon(type);
   const isGoal = ["goal", "penalty_goal", "own_goal"].includes(type);
   const hasScore = (
     Number.isInteger(event.home_score)

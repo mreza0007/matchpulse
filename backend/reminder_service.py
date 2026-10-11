@@ -1,5 +1,5 @@
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from competition_data_service import (
     CompetitionDataProviderError,
@@ -151,7 +151,9 @@ def prepare_reminder_snapshot(request, now=None):
     if not canonical_match_id or canonical_match_id != request["match_id"]:
         raise ReminderMatchNotFoundError()
 
-    validate_reminder_eligibility(match, now=now)
+    kickoff = validate_reminder_eligibility(match, now=now)
+    if kickoff - timedelta(minutes=60) <= (now or datetime.now(timezone.utc)):
+        raise ReminderEligibilityError("Reminder trigger is not in the future")
     snapshot = deepcopy(match)
     snapshot["competition_key"] = competition["competition_key"]
     snapshot["season_key"] = season["season_key"]

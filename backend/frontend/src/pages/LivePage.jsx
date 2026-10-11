@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useCompetitionMetadata } from "../hooks/useCompetitionMetadata.js";
 import { useDailyMatches, useTehranCalendarDates } from "../hooks/useDailyMatches.js";
 import { useScopedMatchEvents } from "../hooks/useScopedMatchEvents.js";
 import CompetitionMatchGroup from "../components/competitions/CompetitionMatchGroup.jsx";
@@ -19,7 +20,8 @@ function LiveSkeleton() {
   );
 }
 
-export default function LivePage({ lang, t }) {
+export default function LivePage({ lang, t, favoriteProps }) {
+  const competitions = useCompetitionMetadata();
   const dates = useTehranCalendarDates();
   const [selectedDay, setSelectedDay] = useState("today");
   const result = useDailyMatches(dates[selectedDay]);
@@ -76,6 +78,8 @@ export default function LivePage({ lang, t }) {
               {(group.matches || []).map((match, matchIndex) => (
                 <MatchCard
                   awayLogo={match.away_logo || ""}
+                  {...favoriteProps}
+                  competition={competitions[group.competition?.key || match.competition_key]}
                   favoriteTeamIds={EMPTY_SET}
                   favoriteTeamKeys={EMPTY_SET}
                   homeLogo={match.home_logo || ""}
@@ -83,7 +87,7 @@ export default function LivePage({ lang, t }) {
                   lang={lang}
                   match={match}
                   {...matchEvents.eventProps(match)}
-                  showFavorites={false}
+                  showFavorites={Boolean(competitions[group.competition?.key || match.competition_key])}
                   showPredictions={false}
                   showReminder={false}
                   showStatusSummary

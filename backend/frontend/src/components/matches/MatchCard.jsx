@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { favoriteControl, favoriteMatchTeam } from "../../utils/favorites.js";
 import UiIcon from "../layout/UiIcon.jsx";
 import EventRow from "./EventRow.jsx";
 import TeamFlag from "../teams/TeamFlag.jsx";
@@ -39,6 +40,10 @@ function MatchCard({
   favoriteTeamIds,
   favoriteTeamKeys,
   onFavoriteToggle,
+  competition,
+  favoriteIdentityKeys,
+  favoritePendingKeys,
+  favoritesDisabled = false,
   lang,
   onDetailsClick,
   isExpanded = false,
@@ -77,10 +82,12 @@ function MatchCard({
   const predictionLocked = showPredictions && (predictionForceLocked || isPredictionLocked(match));
   const showPrediction = showPredictions && (isFutureMatchStatus(match) || Boolean(prediction));
   const stopCardClick = (event) => event.stopPropagation();
-  const renderTeamName = (name, flag, englishName, team, logo) => {
-    const isFavorite = team
-      ? favoriteTeamIds.has(String(team.id)) ||
-        favoriteTeamKeys.has(normalizeTeamKey(team.team_key || team.name_en || team.name_fa || team.team_name || team.id))
+  const renderTeamName = (name, flag, englishName, legacyTeam, logo, side) => {
+    const team = competition ? favoriteMatchTeam(match, side) : legacyTeam;
+    const control = favoriteControl(competition, team, favoriteIdentityKeys, favoritePendingKeys);
+    const isFavorite = competition ? control.active : team
+      ? favoriteTeamIds?.has(String(team.id)) ||
+        favoriteTeamKeys?.has(normalizeTeamKey(team.team_key || team.name_en || team.name_fa || team.team_name || team.id))
       : false;
 
     return (
@@ -91,13 +98,18 @@ function MatchCard({
           teamName={englishName}
         />
         {name}
-        {showFavorites && team && (
+        {showFavorites && team && (!competition || control.visible) && (
           <button
+            type="button"
+            aria-pressed={Boolean(isFavorite)}
+            aria-busy={control.pending}
+            disabled={favoritesDisabled || control.pending}
             className={`favorite-star ${isFavorite ? "active" : ""}`}
-            aria-label={isFavorite ? t.removeFavorite : t.addFavorite}
+            aria-label={`${isFavorite ? t.removeFavorite : t.addFavorite}: ${name}`}
             onClick={(event) => {
               event.stopPropagation();
-              onFavoriteToggle(team);
+              if (competition) onFavoriteToggle?.(competition, team);
+              else onFavoriteToggle?.(team);
             }}
           >
             {isFavorite ? "\u2605" : "\u2606"}
@@ -141,7 +153,7 @@ function MatchCard({
 
       <div className="match-score-block">
         <div className="teams">
-          {renderTeamName(homeName, match.home_flag, match.home_en, homeTeam, homeLogo)}
+          {renderTeamName(homeName, match.home_flag, match.home_en, homeTeam, homeLogo, "home")}
           <span
             className={
               matchScore
@@ -153,7 +165,7 @@ function MatchCard({
           >
             {matchScore || (shouldShowScoreFallback ? t.scorePending : t.vs)}
           </span>
-          {renderTeamName(awayName, match.away_flag, match.away_en, awayTeam, awayLogo)}
+          {renderTeamName(awayName, match.away_flag, match.away_en, awayTeam, awayLogo, "away")}
         </div>
         <PenaltySummary match={match} lang={lang} />
       </div>

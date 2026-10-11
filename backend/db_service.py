@@ -589,6 +589,18 @@ def save_reminder_to_db(
                 """,
                 (telegram_id, competition_key, season_key, match_id, match_data),
             )
+            if cursor.rowcount == 0:
+                existing = conn.execute(
+                    "SELECT match_data, notified FROM reminders WHERE telegram_id = ? AND competition_key = ? AND season_key = ? AND match_id = ?",
+                    (telegram_id, competition_key, season_key, match_id),
+                ).fetchone()
+                # Only explicit, validated creation may renew an unsent retired reminder.
+                # Never reset a sent reminder or its persistent notification dedupe state.
+                if existing and not existing[1] and json.loads(existing[0]).get("reminder_state") == "retired":
+                    cursor = conn.execute(
+                        "UPDATE reminders SET match_data = ? WHERE telegram_id = ? AND competition_key = ? AND season_key = ? AND match_id = ? AND notified = 0",
+                        (match_data, telegram_id, competition_key, season_key, match_id),
+                    )
         elif state == "legacy":
             legacy_match_id = _require_legacy_worldcup_identity(
                 competition_key, season_key, match_id

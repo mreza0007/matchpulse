@@ -51,6 +51,7 @@ import {
   buildReminderIdentitySet,
   finishReminderMutation,
   isReminderEligibleMatch,
+  isActiveReminder,
   reminderErrorTranslationKey,
   reminderIdentityFromMatch,
   reminderIdentityFromRecord,
@@ -136,6 +137,7 @@ function App() {
   const scoreChangeTimeouts = useRef(new Map());
   const eventRequestController = useRef(null);
   const favoriteMutationVersion = useRef(0);
+  const favoritePendingKeysRef = useRef(new Set());
   const favoriteMutationControllers = useRef(new Set());
   const favoriteRequestController = useRef(null);
   const reminderLoadVersion = useRef(0);
@@ -166,7 +168,7 @@ function App() {
   );
 
   const reminderIdentityKeys = useMemo(
-    () => buildReminderIdentitySet(reminders),
+    () => buildReminderIdentitySet(reminders.filter((reminder) => isActiveReminder(reminder))),
     [reminders],
   );
 
@@ -491,6 +493,29 @@ function App() {
   }, [telegramId, telegramUser]);
 
   useEffect(() => {
+    if (activeTab !== "profile" || !telegramId) return undefined;
+    let cancelled = false;
+    const refresh = async () => {
+      const version = ++reminderLoadVersion.current;
+      const mutation = reminderMutationVersion.current;
+      try {
+        const response = await fetchReminders(telegramId);
+        if (!response.ok) throw new Error("Active reminders unavailable");
+        const data = await response.json();
+        if (!cancelled && version === reminderLoadVersion.current && mutation === reminderMutationVersion.current) {
+          setReminders(Array.isArray(data.reminders) ? data.reminders : []);
+          setReminderMessage("");
+        }
+      } catch {
+        if (!cancelled && version === reminderLoadVersion.current) setReminderMessage(t.reminderProviderError);
+      }
+    };
+    refresh();
+    const timer = setInterval(refresh, 60000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [activeTab, telegramId, t.reminderProviderError]);
+
+  useEffect(() => {
     favoriteRequestController.current?.abort();
     if (!telegramId) {
       return undefined;
@@ -610,6 +635,8 @@ function App() {
 
     const teamId = String(team.id);
     const identityKey = favoriteIdentityKey(competitionKey, teamId);
+    if (favoritePendingKeysRef.current.has(identityKey)) return;
+    favoritePendingKeysRef.current.add(identityKey);
     const displayName = getTeamDisplayName(team);
     const controller = new AbortController();
     favoriteMutationVersion.current += 1;
@@ -643,6 +670,7 @@ function App() {
       })
       .catch((error) => favoriteMutationFailed(error, t.favoriteAddError))
       .finally(() => {
+        favoritePendingKeysRef.current.delete(identityKey);
         favoriteMutationControllers.current.delete(controller);
         setFavoritePendingKeys((current) => {
           const next = new Set(current);
@@ -661,6 +689,8 @@ function App() {
 
     const teamId = String(favorite.team_id);
     const identityKey = favoriteIdentityKey(favorite.competition_key, teamId);
+    if (favoritePendingKeysRef.current.has(identityKey)) return;
+    favoritePendingKeysRef.current.add(identityKey);
     const displayName = getTeamDisplayName(favorite);
     const controller = new AbortController();
     favoriteMutationVersion.current += 1;
@@ -687,6 +717,7 @@ function App() {
       })
       .catch((error) => favoriteMutationFailed(error, t.favoriteRemoveError))
       .finally(() => {
+        favoritePendingKeysRef.current.delete(identityKey);
         favoriteMutationControllers.current.delete(controller);
         setFavoritePendingKeys((current) => {
           const next = new Set(current);
@@ -1021,7 +1052,7 @@ function App() {
         telegramUser={telegramUser}
       />
 
-      {!['home', 'live', 'competitions', 'news', 'predictions'].includes(activeTab) && (
+      {!['home', 'live', 'competitions', 'news', 'predictions', 'profile'].includes(activeTab) && (
         <section className="hero legacy-hero">
           <div className="hero-toolbar">
             <BrandLogo key={selectedCompetition.competitionKey} competition={selectedCompetition} lang={lang} />
@@ -1061,9 +1092,10 @@ function App() {
         </section>
       )}
 
-      {activeTab === "home" && <HomePage lang={lang} t={t} />}
+      {['home', 'live', 'competitions'].includes(activeTab) && favoriteMessage && <p className="status-message" role="status">{favoriteMessage}</p>}
+      {activeTab === "home" && <HomePage lang={lang} t={t} favoriteProps={{ favoriteIdentityKeys, favoritePendingKeys, favoritesDisabled: !telegramId, onFavoriteToggle: toggleScopedFavorite }} />}
 
-      {activeTab === "live" && <LivePage lang={lang} t={t} />}
+      {activeTab === "live" && <LivePage lang={lang} t={t} favoriteProps={{ favoriteIdentityKeys, favoritePendingKeys, favoritesDisabled: !telegramId, onFavoriteToggle: toggleScopedFavorite }} />}
 
       {activeTab === "competitions" && (
         <CompetitionsPage
@@ -1170,6 +1202,7 @@ function App() {
           isUserSaved={isUserSaved}
           lang={lang}
           onRemoveFavorite={removeScopedFavorite}
+          onChooseFavorites={() => setActiveTab("competitions")}
           onRemoveReminder={removeReminder}
           predictionStats={predictionStats}
           reminderMessage={reminderMessage}
