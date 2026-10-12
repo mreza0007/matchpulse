@@ -5,13 +5,13 @@ import { formatTehranMatchDateTime } from "../utils/dates.js";
 import { isActiveReminder, reminderIdentityKeyFromRecord } from "../utils/reminders.js";
 import { getLocalizedTeamName } from "../utils/teams.js";
 import { formatSeasonLabel } from "../utils/competitionPresentation.js";
+import { favoriteCompetitionName } from "../utils/favorites.js";
 
-function FavoriteGroup({ favorites, isPending, lang, onRemove, t, title }) {
+function FavoriteGroup({ favorites, isPending, lang, onRemove, t }) {
   return (
     <section className="profile-favorite-group">
       <div className="profile-favorite-group-heading">
-        <h4>{title}</h4>
-        <span>{favorites.length}</span>
+        <h4>{favoriteCompetitionName(favorites[0], lang) || t.unavailable}</h4>
       </div>
       {favorites.map((favorite) => (
         <FavoriteTeamItem
@@ -29,7 +29,6 @@ function FavoriteGroup({ favorites, isPending, lang, onRemove, t, title }) {
 
 export default function ProfilePage({
   canRemoveReminders,
-  favoriteMessage,
   favoriteMeta,
   favoritePendingKeys,
   favoriteStatus,
@@ -127,7 +126,6 @@ export default function ProfilePage({
           {telegramUser && favoriteStatus === "error" && (
             <p className="profile-favorite-error">{t.favoriteLoadError}</p>
           )}
-          {favoriteMessage && <p className="status-message">{favoriteMessage}</p>}
           {showResolutionNotice && (
             <p className="profile-favorite-notice">{t.favoriteResolutionNotice}</p>
           )}
@@ -141,7 +139,6 @@ export default function ProfilePage({
               lang={lang}
               onRemove={onRemoveFavorite}
               t={t}
-              title={group.title}
             />
           ))}
         </div>

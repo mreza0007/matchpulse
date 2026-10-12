@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
+import { useTransientFeedback } from "./hooks/useTransientFeedback.js";
+import { favoriteDisplayName } from "./utils/favorites.js";
 import { COMPETITIONS } from "./config/competitions.js";
 import { translations } from "./config/translations.js";
 import { competitionNavigationKey } from "./utils/competitionPresentation.js";
@@ -113,7 +115,8 @@ function App() {
   const [worldcupSummaryError, setWorldcupSummaryError] = useState("");
   const [teams, setTeams] = useState([]);
   const [favoriteTeams, setFavoriteTeams] = useState([]);
-  const [favoriteMessage, setFavoriteMessage] = useState("");
+  const [favoriteFeedback, setFavoriteMessage, dismissFavoriteFeedback] = useTransientFeedback();
+  const favoriteMessage = favoriteFeedback?.message || "";
   const [favoriteStatus, setFavoriteStatus] = useState(
     initialTelegramUser?.id ? "loading" : "idle",
   );
@@ -194,11 +197,7 @@ function App() {
     return lookup;
   }, [teams]);
 
-  const getTeamDisplayName = (team) => (
-    lang === "fa"
-      ? team.name_fa || team.team_name || team.name_en
-      : team.name_en || team.team_name || team.name_fa
-  );
+  const getTeamDisplayName = (team) => favoriteDisplayName(team, lang) || t.favoriteUnavailableTeam;
 
   const teamFromMatch = (match, side) => ({
     id: match[`${side}_team_id`] || match[`${side}_en`] || match[`${side}_fa`] || `${match.id}-${side}`,
@@ -666,7 +665,7 @@ function App() {
           unresolvedCount: Number(data.unresolved_count) || 0,
         });
         setFavoriteStatus("ready");
-        setFavoriteMessage(`${displayName} ${t.addedFavorite}`.trim());
+        setFavoriteMessage(`${displayName} ${t.addedFavorite}`.trim(), "success");
       })
       .catch((error) => favoriteMutationFailed(error, t.favoriteAddError))
       .finally(() => {
@@ -713,7 +712,7 @@ function App() {
           unresolvedCount: Number(data.unresolved_count) || 0,
         });
         setFavoriteStatus("ready");
-        setFavoriteMessage(`${displayName} ${t.removedFavorite}`.trim());
+        setFavoriteMessage(`${displayName} ${t.removedFavorite}`.trim(), "success");
       })
       .catch((error) => favoriteMutationFailed(error, t.favoriteRemoveError))
       .finally(() => {
@@ -1092,7 +1091,12 @@ function App() {
         </section>
       )}
 
-      {['home', 'live', 'competitions'].includes(activeTab) && favoriteMessage && <p className="status-message" role="status">{favoriteMessage}</p>}
+      {favoriteMessage && (
+        <div className={`status-message favorite-feedback ${favoriteFeedback.kind}`} role={favoriteFeedback.kind === "error" ? "alert" : "status"} key={favoriteFeedback.id}>
+          <span dir="auto">{favoriteMessage}</span>
+          <button type="button" onClick={dismissFavoriteFeedback} aria-label={t.dismissFeedback} title={t.dismissFeedback}><span aria-hidden="true">×</span></button>
+        </div>
+      )}
       {activeTab === "home" && <HomePage lang={lang} t={t} favoriteProps={{ favoriteIdentityKeys, favoritePendingKeys, favoritesDisabled: !telegramId, onFavoriteToggle: toggleScopedFavorite }} />}
 
       {activeTab === "live" && <LivePage lang={lang} t={t} favoriteProps={{ favoriteIdentityKeys, favoritePendingKeys, favoritesDisabled: !telegramId, onFavoriteToggle: toggleScopedFavorite }} />}
@@ -1100,7 +1104,6 @@ function App() {
       {activeTab === "competitions" && (
         <CompetitionsPage
           initialCompetitionKey={initialCompetitionKey}
-          favoriteMessage={favoriteMessage}
           favoriteIdentityKeys={favoriteIdentityKeys}
           favoritePendingKeys={favoritePendingKeys}
           lang={lang}
@@ -1142,8 +1145,8 @@ function App() {
             ))}
           </div>
 
-          {(reminderMessage || favoriteMessage) && (
-            <p className="status-message">{reminderMessage || favoriteMessage}</p>
+          {reminderMessage && (
+            <p className="status-message">{reminderMessage}</p>
           )}
         </section>
       )}
@@ -1194,7 +1197,6 @@ function App() {
       {activeTab === "profile" && (
         <ProfilePage
           canRemoveReminders
-          favoriteMessage={favoriteMessage}
           favoriteMeta={favoriteMeta}
           favoritePendingKeys={favoritePendingKeys}
           favoriteStatus={favoriteStatus}

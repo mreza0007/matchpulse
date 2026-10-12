@@ -30,7 +30,6 @@ export default function CompetitionsPage({
   reminderIdentityKeys,
   reminderMessage,
   reminderPendingKeys,
-  favoriteMessage,
   favoritePendingKeys,
   lang,
   onFavoriteToggle,
@@ -103,7 +102,6 @@ export default function CompetitionsPage({
         reminderPendingKeys={reminderPendingKeys}
         competition={selectedCompetition}
         favoriteIdentityKeys={favoriteIdentityKeys}
-        favoriteMessage={favoriteMessage}
         favoritePendingKeys={favoritePendingKeys}
         key={`${selectedCompetition.competition_key}:${selectedCompetition.season_key || ""}`}
         lang={lang}

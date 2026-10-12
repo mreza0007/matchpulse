@@ -183,7 +183,6 @@ function ActiveCompetitionPage({
   divisionSelector,
   divisionLabel,
   favoriteIdentityKeys,
-  favoriteMessage,
   favoritePendingKeys,
   lang,
   onBack,
@@ -866,7 +865,6 @@ function ActiveCompetitionPage({
 
     return (
       <>
-        {favoriteMessage && <p className="status-message">{favoriteMessage}</p>}
         <div className="competition-team-grid">
         {teams.items.map((team, index) => {
           const hasCanonicalIdentity = team.id !== undefined && team.id !== null;
