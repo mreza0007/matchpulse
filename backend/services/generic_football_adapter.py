@@ -461,6 +461,12 @@ def normalize_match_event(event, original_index=0):
     if not isinstance(event, dict):
         return None
 
+    # The wrapper already exposes this text; preserve it in the existing public
+    # description field rather than losing reliable decision evidence.
+    event = dict(event)
+    if not _first_event_text(event, "description"):
+        event["description"] = _first_event_text(event, "description_fa")
+
     event_type = _normalize_event_type(event)
     minute, added_time, display_minute = _event_minute_parts(event)
     secondary_player_name = _first_event_text(

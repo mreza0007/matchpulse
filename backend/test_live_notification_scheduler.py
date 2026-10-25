@@ -55,6 +55,12 @@ def favorite(competition_key="premier_league", team_id="mp_team_home"):
 
 class GenericLiveNotificationTests(unittest.TestCase):
     def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        database = patch.object(db_service, "DB_PATH", Path(directory.name) / "notifications.sqlite")
+        database.start()
+        self.addCleanup(database.stop)
+        db_service.init_db()
         scheduler_service.pending_final_confirmations.clear()
         scheduler_service.scheduler_state.update({
             "bot_app": object(),
@@ -116,12 +122,12 @@ class GenericLiveNotificationTests(unittest.TestCase):
             {"id": "mp_event_sub", "type": "substitution", "team_side": "home", "minute": 40},
             {"id": "mp_event_half", "type": "halftime", "minute": 45},
         ]
-        first = [scheduler_service.event_notification(event, fixture)[:2] for event in events]
-        second = [scheduler_service.event_notification(event, fixture)[:2] for event in reversed(events)]
+        first = [result[:2] for event in events if (result := scheduler_service.event_notification(event, fixture))]
+        second = [result[:2] for event in reversed(events) if (result := scheduler_service.event_notification(event, fixture))]
         self.assertEqual(set(first), set(second))
         self.assertEqual(
             {item[0] for item in first},
-            {"goal", "yellow_card", "red_card", "substitution", "halftime"},
+            {"goal", "red_card", "halftime"},
         )
         self.assertNotIn("None", scheduler_service.build_substitution_message(fixture, events[3]))
 
@@ -168,7 +174,7 @@ class GenericLiveNotificationTests(unittest.TestCase):
         )
         self.assertEqual(
             {item[1] for item in sent},
-            {"match_started", "halftime", "goal", "yellow_card", "red_card", "substitution"},
+            {"match_started", "halftime", "goal", "red_card"},
         )
 
     def test_repeated_poll_and_provider_reorder_do_not_resend_events(self):
@@ -218,7 +224,7 @@ class GenericLiveNotificationTests(unittest.TestCase):
         )
         self.assertEqual(
             [item[2] for item in delivered].count("yellow_card"),
-            1,
+            0,
         )
         self.assertEqual(
             [item[2] for item in delivered].count("match_started"),
@@ -253,7 +259,7 @@ class GenericLiveNotificationTests(unittest.TestCase):
         send.assert_not_called()
         self.assertEqual(
             {item[2] for item in persisted},
-            {"match_started", "halftime", "goal", "yellow_card", "substitution"},
+            {"match_started", "halftime", "goal"},
         )
         self.assertTrue(scheduler_service.scheduler_state["seeded_existing_live_notifications"])
 

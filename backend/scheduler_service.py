@@ -4,6 +4,7 @@ import json
 import os
 import re
 import time
+import threading
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -15,6 +16,7 @@ from reminder_service import (
     validate_reminder_eligibility,
 )
 from services.worldcup_adapter import repair_text
+from live_notification_policy import classify_key_moment, LABELS as KEY_MOMENT_LABELS
 
 from db_service import (
     get_all_favorite_teams_from_db,
@@ -38,6 +40,8 @@ TEHRAN_TZ = ZoneInfo("Asia/Tehran")
 
 scheduler = BackgroundScheduler()
 pending_final_confirmations = {}
+LIVE_NOTIFICATION_LOCK = threading.RLock()
+delivered_pending_persistence = set()
 
 scheduler_state = {
     "bot_app": None,
@@ -563,20 +567,27 @@ def scorer_name(event):
     return event.get("scorer") or event.get("player_name") or event.get("player") or "\u0646\u0627\u0645\u0634\u062e\u0635"
 
 
-def load_matches():
+def load_matches(strict=False):
     get_matches = scheduler_state["get_matches"]
 
     if get_matches is None:
+        if strict:
+            raise RuntimeError("Matches provider unavailable")
         return []
 
     try:
-        return get_matches(status="all")
+        matches = get_matches(status="all")
+        if strict and not isinstance(matches, list):
+            raise RuntimeError("Invalid matches payload")
+        return matches
     except Exception as error:
+        if strict:
+            raise RuntimeError("Matches provider unavailable") from error
         print(f"Failed to load matches for scheduler: {error}")
         return []
 
 
-def load_events(match_id_value):
+def load_events(match_id_value, strict=False):
     get_events = scheduler_state["get_events"]
 
     if get_events is None:
@@ -585,6 +596,8 @@ def load_events(match_id_value):
     try:
         payload = get_events(match_id_value)
     except Exception as error:
+        if strict:
+            raise RuntimeError("Events provider unavailable") from error
         print(f"Failed to load events for match_id={match_id_value}: {error}")
         return []
 
@@ -592,6 +605,8 @@ def load_events(match_id_value):
         provider = payload.get("provider")
         external_match_id = payload.get("external_match_id")
         events = payload.get("events") or []
+        if strict and (not isinstance(events, list) or (not events and (payload.get("warning") or payload.get("error") or payload.get("warnings")))):
+            raise RuntimeError("Events provider unavailable")
 
         for event in events:
             if isinstance(event, dict):
@@ -600,6 +615,8 @@ def load_events(match_id_value):
 
         return events
 
+    if strict and not isinstance(payload, list):
+        raise RuntimeError("Events provider unavailable")
     return payload if isinstance(payload, list) else []
 
 
@@ -758,6 +775,8 @@ def scoped_match_events(match):
         match_id(match),
     )
     events = payload.get("events") if isinstance(payload, dict) else None
+    if not isinstance(events, list) or (not events and (payload.get("warning") or payload.get("error") or payload.get("warnings"))):
+        raise RuntimeError("Events provider unavailable")
     return events if isinstance(events, list) else []
 
 
@@ -777,14 +796,7 @@ def live_event_type(event):
 
 
 def is_scoring_event(event):
-    if live_event_type(event) in {"var", "disallowed_goal", "var_disallowed_goal"}:
-        return False
-    explicit = event.get("is_scoring_event")
-
-    if explicit is True or str(explicit).strip().lower() in {"true", "1", "yes"}:
-        return True
-
-    return live_event_type(event) in {"goal", "own_goal", "penalty_goal"}
+    return classify_key_moment(event) == "goal"
 
 
 def is_live_match(match):
@@ -1098,9 +1110,23 @@ def get_final_notification_text(match, lang="fa"):
 
 
 def send_live_notification_once(bot_app, telegram_id, match, notification_type, event_key, text):
+    with LIVE_NOTIFICATION_LOCK:
+        return _send_live_notification_once(bot_app, telegram_id, match, notification_type, event_key, text)
+
+
+def _send_live_notification_once(bot_app, telegram_id, match, notification_type, event_key, text):
     match_id_value = notification_match_reference(match)
 
     if not match_id_value:
+        return False
+
+    identity = (telegram_id, match_id_value, notification_type, event_key)
+    if identity in delivered_pending_persistence:
+        try:
+            mark_live_notification_sent(*identity)
+            delivered_pending_persistence.discard(identity)
+        except Exception:
+            live_notification_log("live_notification_delivered_persistence_retry_risk", notification_type=notification_type)
         return False
 
     if has_live_notification_been_sent(telegram_id, match_id_value, notification_type, event_key):
@@ -1132,7 +1158,9 @@ def send_live_notification_once(bot_app, telegram_id, match, notification_type, 
             event_loop,
         )
         future.result(timeout=30)
+        delivered_pending_persistence.add(identity)
         mark_live_notification_sent(telegram_id, match_id_value, notification_type, event_key)
+        delivered_pending_persistence.discard(identity)
         live_notification_log(
             "live_notification_sent",
             competition_key=match.get("competition_key"),
@@ -1141,6 +1169,8 @@ def send_live_notification_once(bot_app, telegram_id, match, notification_type, 
         )
         return True
     except Exception:
+        if identity in delivered_pending_persistence:
+            live_notification_log("live_notification_delivered_persistence_retry_risk", notification_type=notification_type)
         live_notification_log(
             "live_notification_failed",
             competition_key=match.get("competition_key"),
@@ -1260,19 +1290,111 @@ def check_live_match_notifications():
         live_notification_log("live_notification_cycle_failed")
 
 
-def event_notification(event, match):
-    event_type = live_event_type(event)
-    if is_scoring_event(event):
-        return "goal", live_event_key(match, event, "goal"), build_goal_message(match, event)
-    if event_type == "yellow_card":
-        return "yellow_card", live_event_key(match, event, "yellow_card"), build_yellow_card_message(match, event)
-    if event_type in {"red_card", "second_yellow_red"}:
-        return "red_card", live_event_key(match, event, "red_card"), build_red_card_message(match, event)
-    if event_type == "substitution":
-        return "substitution", live_event_key(match, event, "substitution"), build_substitution_message(match, event)
-    if event_type == "halftime":
+def event_notification(event, match, lang="fa"):
+    kind = classify_key_moment(event)
+    if kind is None:
+        return None
+    if kind == "halftime":
         return "halftime", "phase:halftime", build_halftime_message(match)
-    return None
+    if kind == "goal" and lang != "en":
+        text = build_goal_message(match, event)
+    elif kind == "red_card" and lang != "en":
+        text = build_red_card_message(match, event)
+    else:
+        if kind == "goal":
+            title = {"own_goal": "Own goal", "penalty_goal": "Penalty goal"}.get(live_event_type(event), "Goal")
+        elif kind == "red_card":
+            title = "Second-yellow dismissal" if live_event_type(event) == "second_yellow_red" else "Red card"
+        else:
+            title = KEY_MOMENT_LABELS[kind][1 if lang == "en" else 0]
+        minute = clean_value(event.get("display_minute") or event.get("raw_minute") or event.get("minute"))
+        detail = " · ".join(value for value in (event_player(event), minute if lang == "en" else to_persian_digits(minute)) if value)
+        teams = f"{localized_team_name(match, 'home', lang)} - {localized_team_name(match, 'away', lang)}"
+        if kind in {"goal", "goal_disallowed", "goal_confirmed"} and has_final_score(match):
+            teams = final_score_line(match, lang)
+        text = "\n".join(line for line in (title, teams, detail) if line)
+    return kind, live_event_key(match, event, kind), text
+
+
+def stable_moment_key(match, event, kind):
+    """Additional correction-resistant alias; existing event keys remain intact."""
+    if clean_value(event.get("id") or event.get("event_id") or event.get("eventId")):
+        return live_event_key(match, event, kind)
+    identity = [kind, clean_value(event.get("display_minute") or event.get("raw_minute") or event.get("minute")),
+                scoring_side(event, match), clean_value(event.get("team_id")), normalize_team_key(event_player(event))]
+    return "moment:" + hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()[:24]
+
+
+def legacy_favorite_goal_keys(telegram_id, match, event, favorites, legacy_index=0):
+    # Old unscoped World Cup keys cannot establish generic competition ownership.
+    if match.get("competition_key") not in (None, "", LEGACY_REMINDER_COMPETITION_KEY):
+        return []
+    favorite = next((item for item in favorites if favorite_matches_scoped_match(item, match)), None) if match.get("competition_key") else user_favorite_for_match(favorites, match)
+    if favorite is None:
+        return []
+    team, _ = favorite_team_context(favorite, match)
+    # Check both directions: own-goal/provider-side corrections must not resend.
+    return [f"favorite_goal_{direction}:{match_id(match)}:{event_id(event, legacy_index)}:{team['key']}:{telegram_id}"
+            for direction in ("for", "against")]
+
+
+def dispatch_event_notification(bot_app, telegram_id, match, event, *, lang="fa", favorites=(), legacy_index=0):
+    with LIVE_NOTIFICATION_LOCK:
+        return _dispatch_event_notification(bot_app, telegram_id, match, event,
+            lang=lang, favorites=favorites, legacy_index=legacy_index)
+
+
+def _dispatch_event_notification(bot_app, telegram_id, match, event, *, lang="fa", favorites=(), legacy_index=0):
+    notification = event_notification(event, match, lang)
+    if notification is None:
+        return False
+    kind, key, text = notification
+    reference = notification_match_reference(match)
+    alias = stable_moment_key(match, event, kind)
+    alias_identity = (telegram_id, reference, kind, alias)
+    if alias != key and alias_identity in delivered_pending_persistence:
+        try:
+            mark_live_notification_sent(*alias_identity)
+            delivered_pending_persistence.discard(alias_identity)
+        except Exception:
+            live_notification_log("live_notification_delivered_persistence_retry_risk", notification_type=kind)
+        return False
+    old_keys = legacy_favorite_goal_keys(telegram_id, match, event, favorites, legacy_index) if kind == "goal" else []
+    if any(notification_already_handled(old) for old in old_keys):
+        suppress_live_notification_for_users([telegram_id], match, kind, key)
+        suppress_live_notification_for_users([telegram_id], match, kind, alias)
+        return False
+    if alias != key and has_live_notification_been_sent(telegram_id, reference, kind, alias):
+        return False
+    sent = send_live_notification_once(bot_app, telegram_id, match, kind, key, text)
+    if alias != key and (telegram_id, reference, kind, key) in delivered_pending_persistence:
+        delivered_pending_persistence.add(alias_identity)
+    if sent:
+        if alias != key:
+            delivered_pending_persistence.add(alias_identity)
+            try:
+                mark_live_notification_sent(*alias_identity)
+                delivered_pending_persistence.discard(alias_identity)
+            except Exception:
+                live_notification_log("live_notification_delivered_persistence_retry_risk", notification_type=kind)
+        for old in old_keys:
+            try:
+                suppress_notification_key(old, telegram_id=telegram_id, match_id_value=match_id(match))
+            except Exception:
+                live_notification_log("live_notification_legacy_alias_write_failed", notification_type=kind)
+    return sent
+
+
+def current_push_events(events):
+    """Latest provider entry wins for an exact ID, without altering the timeline."""
+    last = {}
+    for index, event in enumerate(events):
+        identity = clean_value(event.get("id") or event.get("event_id") or event.get("eventId"))
+        if identity:
+            last[identity] = index
+    return [event for index, event in enumerate(events)
+            if not (identity := clean_value(event.get("id") or event.get("event_id") or event.get("eventId")))
+            or last[identity] == index]
 
 
 def suppress_live_notification_for_users(user_ids, match, notification_type, event_key):
@@ -1286,6 +1408,19 @@ def suppress_live_notification_for_users(user_ids, match, notification_type, eve
         mark_live_notification_sent(telegram_id, reference, notification_type, event_key)
         suppressed += 1
     return suppressed
+
+
+def seed_key_moments(user_ids, match, events):
+    seeded = 0
+    for event in current_push_events(events):
+        notification = event_notification(event, match)
+        if notification is not None:
+            kind, key, _ = notification
+            seeded += suppress_live_notification_for_users(user_ids, match, kind, key)
+            alias = stable_moment_key(match, event, kind)
+            if alias != key:
+                seeded += suppress_live_notification_for_users(user_ids, match, kind, alias)
+    return seeded
 
 
 def seed_generic_live_notification_state(matches, favorites_by_user):
@@ -1314,10 +1449,7 @@ def seed_generic_live_notification_state(matches, favorites_by_user):
         except Exception:
             scheduler_state["pending_startup_event_seed"].add(notification_match_reference(snapshot))
             continue
-        for event in events:
-            notification = event_notification(event, snapshot)
-            if notification is not None:
-                seeded += suppress_live_notification_for_users(user_ids, snapshot, notification[0], notification[1])
+        seeded += seed_key_moments(user_ids, snapshot, events)
     scheduler_state["seeded_existing_live_notifications"] = True
     live_notification_log("live_notification_startup_seeded", notifications=seeded)
 
@@ -1367,6 +1499,10 @@ def check_legacy_live_match_notifications_once():
     if bot_app is None:
         return
 
+    if not scheduler_state["seeded_existing_live_notifications"]:
+        seed_existing_match_notification_state()
+        return
+
     matches = load_matches()
     live_matches = [match for match in matches if is_live_match(match)]
     process_final_confirmations(matches, bot_app)
@@ -1388,28 +1524,26 @@ def check_legacy_live_match_notifications_once():
             build_match_started_message(match),
         )
 
-        events = load_events(match_id_value)
-
-        for event in events:
-            event_type = live_event_type(event)
-
-            if is_scoring_event(event):
-                notify_relevant_users(
-                    bot_app,
-                    match,
-                    "goal",
-                    live_event_key(match, event, "goal"),
-                    build_goal_message(match, event),
-                )
-
-            if event_type == "red_card":
-                notify_relevant_users(
-                    bot_app,
-                    match,
-                    "red_card",
-                    live_event_key(match, event, "red_card"),
-                    build_red_card_message(match, event),
-                )
+        user_ids = get_relevant_users_for_match(match)
+        try:
+            events = load_events(match_id_value, strict=True)
+        except RuntimeError:
+            continue
+        reference = notification_match_reference(match)
+        if reference in scheduler_state["pending_startup_event_seed"]:
+            seed_key_moments(user_ids, match, events)
+            scheduler_state["pending_startup_event_seed"].discard(reference)
+            continue
+        favorites = get_all_favorite_teams_from_db()
+        users = {user["telegram_id"]: user for user in get_all_users()}
+        goal_index = 0
+        for event in current_push_events(events):
+            for telegram_id in user_ids:
+                lang = "en" if str(users.get(telegram_id, {}).get("language_code") or "").startswith("en") else "fa"
+                dispatch_event_notification(bot_app, telegram_id, match, event, lang=lang,
+                    favorites=favorites.get(telegram_id, []), legacy_index=goal_index)
+            if live_event_type(event) == "goal":
+                goal_index += 1
 
 
 def check_generic_live_match_notifications_once():
@@ -1479,28 +1613,17 @@ def check_generic_live_match_notifications_once():
             continue
         reference = notification_match_reference(snapshot)
         if reference in scheduler_state["pending_startup_event_seed"]:
-            for event in events:
-                notification = event_notification(event, snapshot)
-                if notification is not None:
-                    suppress_live_notification_for_users(
-                        user_ids, snapshot, notification[0], notification[1]
-                    )
+            seed_key_moments(user_ids, snapshot, events)
             scheduler_state["pending_startup_event_seed"].discard(reference)
             continue
-        for event in events:
-            notification = event_notification(event, snapshot)
-            if notification is None:
-                continue
-            notification_type, event_key, text = notification
+        goal_index = 0
+        for event in current_push_events(events):
             for telegram_id in user_ids:
-                send_live_notification_once(
-                    bot_app,
-                    telegram_id,
-                    snapshot,
-                    notification_type,
-                    event_key,
-                    text,
-                )
+                lang = "en" if str(users_by_id.get(telegram_id, {}).get("language_code") or "").startswith("en") else "fa"
+                dispatch_event_notification(bot_app, telegram_id, snapshot, event, lang=lang,
+                    favorites=favorites_by_user.get(telegram_id, []), legacy_index=goal_index)
+            if live_event_type(event) == "goal":
+                goal_index += 1
     process_generic_final_confirmations(
         refreshed_matches, bot_app, favorites_by_user, users_by_id
     )
@@ -1525,8 +1648,13 @@ def seed_existing_match_notification_state():
     users = get_all_users()
     favorites_by_user = get_all_favorite_teams_from_db()
     seeded_count = 0
+    try:
+        matches = load_matches(strict=True)
+    except RuntimeError:
+        live_notification_log("live_notification_startup_seed_deferred")
+        return
 
-    for match in load_matches():
+    for match in matches:
         match_id_value = match_id(match)
 
         if not match_id_value:
@@ -1557,11 +1685,19 @@ def seed_existing_match_notification_state():
                     match_id_value=match_id_value,
                 )
                 seeded_count += 1
+                if favorite:
+                    suppress_notification_key(f"final:{match_id_value}:{telegram_id}",
+                        telegram_id=telegram_id, match_id_value=match_id_value)
 
-        if not favorites_by_user or not (is_started or is_finished):
+        user_ids = get_relevant_users_for_match(match)
+        if is_started:
+            seeded_count += suppress_live_notification_for_users(user_ids, match, "match_started", "started")
+        try:
+            events = load_events(match_id_value, strict=True)
+        except RuntimeError:
+            scheduler_state["pending_startup_event_seed"].add(notification_match_reference(match))
             continue
-
-        events = load_events(match_id_value)
+        seeded_count += seed_key_moments(user_ids, match, events)
         goal_events = [
             event for event in events
             if live_event_type(event) == "goal"
@@ -1853,9 +1989,15 @@ def check_match_finished_notifications():
 
 
 def check_favorite_goal_notifications():
+    if not live_notifications_enabled():
+        return
     bot_app = scheduler_state["bot_app"]
 
     if bot_app is None:
+        return
+
+    if not scheduler_state["seeded_existing_live_notifications"]:
+        seed_existing_match_notification_state()
         return
 
     favorites_by_user = get_all_favorite_teams_from_db()
@@ -1869,49 +2011,34 @@ def check_favorite_goal_notifications():
         if not match_id_value or not (match_has_started(match) or match_is_finished(match)):
             continue
 
-        events = load_events(match_id_value)
+        try:
+            events = load_events(match_id_value, strict=True)
+        except RuntimeError:
+            continue
+        reference = notification_match_reference(match)
+        if reference in scheduler_state["pending_startup_event_seed"]:
+            seed_key_moments(favorite_user_ids_for_match(favorites_by_user, match), match, events)
+            scheduler_state["pending_startup_event_seed"].discard(reference)
+            continue
         goal_events = [
-            event for event in events
-            if live_event_type(event) == "goal"
+            event for event in current_push_events(events)
+            if is_scoring_event(event)
         ]
 
         if not goal_events:
             continue
 
-        for index, event in enumerate(goal_events):
-            side = scoring_side(event, match)
-
-            if side not in {"home", "away"}:
-                continue
-
-            scoring_team = team_display(match, side)
-
+        users = {user["telegram_id"]: user for user in get_all_users()}
+        old_goal_indexes = {id(row): index for index, row in enumerate(
+            row for row in events if live_event_type(row) == "goal")}
+        for event in goal_events:
             for telegram_id, favorites in favorites_by_user.items():
-                favorite = user_favorite_for_match(favorites, match)
-
-                if not favorite:
+                relevant = any(favorite_matches_scoped_match(item, match) for item in favorites) if match.get("competition_key") else user_favorite_for_match(favorites, match) is not None
+                if not relevant:
                     continue
-
-                favorite_team, _opponent = favorite_team_context(favorite, match)
-                event_key = event_id(event, index)
-
-                if scoring_team["key"] == favorite_team["key"]:
-                    key = f"favorite_goal_for:{match_id_value}:{event_key}:{favorite_team['key']}:{telegram_id}"
-                    text = (
-                        f"{DEFAULT_BALL} \u06af\u0644 \u0628\u0631\u0627\u06cc \u062a\u06cc\u0645 \u0645\u062d\u0628\u0648\u0628\u062a!\n"
-                        f"{favorite_team['flag']} {favorite_team['name']}\n\n"
-                        f"\u06af\u0644\u0632\u0646: {scorer_name(event)}\n\n"
-                        f"{score_line(match)}"
-                    )
-                else:
-                    key = f"favorite_goal_against:{match_id_value}:{event_key}:{favorite_team['key']}:{telegram_id}"
-                    text = (
-                        f"{DEFAULT_BALL} \u06af\u0644 \u0628\u0631\u0627\u06cc {scoring_team['name']} {scoring_team['flag']}\n"
-                        f"\u06af\u0644\u0632\u0646: {scorer_name(event)}\n\n"
-                        f"{score_line(match)}"
-                    )
-
-                send_once(bot_app, telegram_id, text, key, match_id_value, "favorite goal notification")
+                lang = "en" if str(users.get(telegram_id, {}).get("language_code") or "").startswith("en") else "fa"
+                dispatch_event_notification(bot_app, telegram_id, match, event, lang=lang,
+                    favorites=favorites, legacy_index=old_goal_indexes.get(id(event), 0))
 
 
 def check_all_notifications():
