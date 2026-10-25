@@ -2074,6 +2074,8 @@ def start_scheduler(
     scheduler_state["event_loop"] = event_loop
 
     if not scheduler.running:
+        from news_ingestion import register_news_job
+        register_news_job(scheduler)
         scheduler.add_job(
             check_all_notifications,
             "interval",

@@ -33,7 +33,8 @@ from competition_data_service import (
     get_teams_for_season,
 )
 from season_service import get_season, get_seasons
-from news_service import filter_news, filter_news_for_favorites
+from news_service import query_news
+from news_store import NewsStorageError
 from favorite_service import (
     FavoriteTeamTypeError,
     favorite_response_item,
@@ -576,14 +577,20 @@ def get_news(
     category: str | None = Query(None),
     competition_key: str | None = Query(None),
     team_id: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=10000),
 ):
     try:
-        news = filter_news(
+        news = query_news(
             NEWS,
             category=category,
             competition_key=competition_key,
             team_id=team_id,
+            limit=limit,
+            offset=offset,
         )
+    except NewsStorageError as error:
+        raise HTTPException(status_code=503, detail="News storage unavailable") from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
@@ -671,11 +678,15 @@ def favorite_storage_http_error(error):
 def get_favorite_news(
     telegram_id: int,
     category: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=10000),
 ):
     validate_favorite_telegram_id(telegram_id)
     try:
         identities = get_favorite_team_identities_v2_from_db(telegram_id)
-        news = filter_news_for_favorites(NEWS, identities, category=category)
+        news = query_news(NEWS, favorites=identities, category=category, limit=limit, offset=offset)
+    except NewsStorageError as error:
+        raise HTTPException(status_code=503, detail="News storage unavailable") from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except (FavoriteTeamsV2RequiredError, sqlite3.Error) as error:

@@ -53,6 +53,8 @@ MATCHES = [
 NEWS = [
     {
         "id": 1,
+        "origin": "static_notice",
+        "source": "MatchPulse",
         "tag_fa": "برنامه مسابقات",
         "tag_en": "Schedule",
         "title_fa": "برنامه رسمی مسابقات جام جهانی ۲۰۲۶ از سوی فیفا منتشر شده است",
@@ -64,6 +66,8 @@ NEWS = [
     },
     {
         "id": 2,
+        "origin": "static_notice",
+        "source": "MatchPulse",
         "tag_fa": "تیم‌ها",
         "tag_en": "Teams",
         "title_fa": "صفحه رسمی تیم‌های حاضر در جام جهانی ۲۰۲۶ در سایت فیفا در دسترس است",

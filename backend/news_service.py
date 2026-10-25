@@ -1,6 +1,30 @@
 VALID_NEWS_CATEGORIES = frozenset({"iran", "world", "national", "transfers"})
 
 
+def query_news(fallback, *, category=None, competition_key=None, team_id=None,
+               favorites=None, limit=50, offset=0):
+    import sqlite3
+    from news_sources import approved_sources
+    from news_store import NewsStorageError, read_articles
+    # Validate even when the store has no matching rows.
+    filter_news([], category, competition_key, team_id)
+    if not 1 <= limit <= 100 or not 0 <= offset <= 10000:
+        raise ValueError("Invalid news pagination")
+    sources = approved_sources()
+    if sources:
+        try:
+            items = read_articles(sources, category=category, competition_key=competition_key,
+                                  team_id=team_id, favorites=favorites, limit=limit, offset=offset)
+        except sqlite3.Error as error:
+            raise NewsStorageError("News storage unavailable") from error
+        if items is not None:
+            return items
+    items = filter_news(fallback, category, competition_key, team_id)
+    if favorites is not None:
+        items = filter_news_for_favorites(items, favorites)
+    return items[offset:offset + limit]
+
+
 def filter_news(items, category=None, competition_key=None, team_id=None):
     if category is not None and category not in VALID_NEWS_CATEGORIES:
         raise ValueError("Invalid news category")
