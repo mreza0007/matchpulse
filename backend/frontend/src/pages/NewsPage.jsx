@@ -2,173 +2,82 @@ import { useEffect, useRef, useState } from "react";
 import { fetchFavoriteNews, fetchNews } from "../api/news.js";
 import NewsCard from "../components/news/NewsCard.jsx";
 import { COMPETITIONS } from "../config/competitions.js";
+import { favoriteDisplayName, favoriteCompetitionName } from "../utils/favorites.js";
+import { createNewsFeed, favoriteNewsRevision } from "../utils/news.js";
+import "./NewsPage.css";
 
-const CATEGORIES = [
-  { key: "all", value: null, labelKey: "newsCategoryAll" },
-  { key: "favorites", value: null, labelKey: "newsCategoryFavorites" },
-  { key: "iran", value: "iran", labelKey: "newsCategoryIran" },
-  { key: "world", value: "world", labelKey: "newsCategoryWorld" },
-  { key: "national", value: "national", labelKey: "newsCategoryNational" },
-  { key: "transfers", value: "transfers", labelKey: "newsCategoryTransfers" },
-];
+const CATEGORIES = ["all", "iran", "world", "transfers", "favorites", "national"];
+const labelKey = (key) => `newsCategory${key.charAt(0).toUpperCase()}${key.slice(1)}`;
 
-function NewsSkeleton() {
-  return (
-    <div className="structured-news-list" aria-hidden="true">
-      {[0, 1, 2].map((index) => (
-        <div className="structured-news-skeleton" key={index}>
-          <span />
-          <span />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function trustedCompetitionLabels(item, lang) {
-  if (!Array.isArray(item?.related_competition_keys)) return [];
-
-  return item.related_competition_keys.flatMap((key) => {
-    const competition = COMPETITIONS[key];
-    if (!competition) return [];
-    return [competition.labels[lang] || competition.labels.en];
-  });
-}
-
-export default function NewsPage({ lang, t, telegramId }) {
-  const [selectedCategory, setSelectedCategory] = useState("all");
-  const [result, setResult] = useState({ items: [], loading: true, error: null });
-  const [retryVersion, setRetryVersion] = useState(0);
-  const cache = useRef(new Map());
-  const requestVersion = useRef(0);
-  const selectedOption = CATEGORIES.find((category) => category.key === selectedCategory);
-  const isFavoritesFeed = selectedCategory === "favorites";
-  const hasUsableTelegramId = (
-    (Number.isSafeInteger(telegramId) && telegramId > 0)
-    || (typeof telegramId === "string" && /^[1-9]\d*$/.test(telegramId))
-  );
-  const cacheKey = isFavoritesFeed
-    ? `favorites:${String(telegramId)}`
-    : `normal:${selectedCategory}`;
-
+function NewsFeed({ category, competitionKey, teamId, telegramId, lang, t }) {
+  const [result, setResult] = useState({ items: [], loading: true, error: false, hasMore: false });
+  const feed = useRef(null);
   useEffect(() => {
-    if (isFavoritesFeed && !hasUsableTelegramId) return undefined;
+    const common = { category: ["all", "favorites"].includes(category) ? undefined : category };
+    const instance = createNewsFeed((pagination) => category === "favorites" && !teamId
+      ? fetchFavoriteNews(telegramId, { ...common, ...pagination })
+      : fetchNews({ ...common, competitionKey, teamId, ...pagination }), setResult);
+    feed.current = instance;
+    instance.refresh();
+    return () => instance.dispose();
+  }, [category, competitionKey, teamId, telegramId]);
 
-    if (cache.current.has(cacheKey)) {
-      setResult({ items: cache.current.get(cacheKey), loading: false, error: null });
-      return undefined;
-    }
+  return <div className="news-feed" aria-busy={result.loading}>
+    <div className="news-feed-toolbar">
+      <button type="button" disabled={result.loading} onClick={() => feed.current?.refresh()}>{t.newsRefresh}</button>
+    </div>
+    {result.error && <div className="home-empty-state structured-news-error" role="status">
+      <p>{result.items.length ? t.newsRefreshError : category === "favorites" ? t.favoriteNewsLoadError : t.newsLoadError}</p>
+      <button type="button" disabled={result.loading} onClick={() => feed.current?.retry()}>{t.retry}</button>
+    </div>}
+    {result.loading && !result.items.length && <div className="structured-news-list" aria-label={t.loading}>
+      {[0, 1, 2].map((index) => <div className="structured-news-skeleton" key={index} aria-hidden="true"><span /><span /></div>)}
+    </div>}
+    {!result.loading && !result.error && !result.items.length && <div className="home-empty-state">
+      {category === "favorites" ? t.favoriteNewsEmpty : t.newsCategoryEmpty}
+    </div>}
+    <div className="structured-news-list">
+      {result.items.map((item) => <NewsCard key={item.id} item={item} lang={lang} t={t}
+        categoryLabel={t[labelKey(item.category || "")] || ""}
+        competitionLabels={(item.related_competition_keys || []).flatMap((key) => {
+          const labels = COMPETITIONS[key]?.labels;
+          return labels ? [labels[lang] || labels.en] : [];
+        })} />)}
+    </div>
+    {result.hasMore && <button className="news-load-more" type="button" disabled={result.loading}
+      onClick={() => feed.current?.loadMore()}>{result.loading ? t.loading : t.newsLoadMore}</button>}
+  </div>;
+}
 
-    const controller = new AbortController();
-    const currentRequest = requestVersion.current + 1;
-    requestVersion.current = currentRequest;
-    setResult({ items: [], loading: true, error: null });
-
-    const request = isFavoritesFeed
-      ? fetchFavoriteNews(telegramId, { signal: controller.signal })
-      : fetchNews({ category: selectedOption?.value, signal: controller.signal });
-
-    request
-      .then(async (response) => {
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          const error = new Error(`News request failed: ${response.status}`);
-          error.status = response.status;
-          throw error;
-        }
-        return payload;
-      })
-      .then((payload) => {
-        if (controller.signal.aborted || requestVersion.current !== currentRequest) return;
-        const items = Array.isArray(payload?.news) ? payload.news : [];
-        cache.current.set(cacheKey, items);
-        setResult({ items, loading: false, error: null });
-      })
-      .catch((error) => {
-        if (error.name === "AbortError" || requestVersion.current !== currentRequest) return;
-        console.error("Failed to load News:", error);
-        setResult({
-          items: [],
-          loading: false,
-          error: isFavoritesFeed && error.status === 503 ? "favorites-update" : "generic",
-        });
-      });
-
-    return () => controller.abort();
-  }, [
-    cacheKey,
-    hasUsableTelegramId,
-    isFavoritesFeed,
-    retryVersion,
-    selectedOption?.value,
-    telegramId,
-  ]);
-
-  const selectCategory = (categoryKey) => {
-    if (categoryKey === selectedCategory) return;
-    setSelectedCategory(categoryKey);
-  };
-  const retry = () => {
-    cache.current.delete(cacheKey);
-    setRetryVersion((version) => version + 1);
-  };
-  const identityRequired = isFavoritesFeed && !hasUsableTelegramId;
-
-  return (
-    <section className="structured-news-page">
-      <h1>{t.newsPage}</h1>
-
-      <div className="structured-news-categories" aria-label={t.newsCategories} role="tablist">
-        {CATEGORIES.map((category) => (
-          <button
-            aria-selected={selectedCategory === category.key}
-            className={selectedCategory === category.key ? "active" : ""}
-            key={category.key}
-            onClick={() => selectCategory(category.key)}
-            role="tab"
-            type="button"
-          >
-            {t[category.labelKey]}
-          </button>
-        ))}
-      </div>
-
-      {!identityRequired && result.loading && <NewsSkeleton />}
-
-      {identityRequired && (
-        <div className="home-empty-state">{t.favoriteNewsIdentityRequired}</div>
-      )}
-
-      {!identityRequired && !result.loading && result.error && (
-        <div className="home-empty-state structured-news-error">
-          <p>
-            {result.error === "favorites-update"
-              ? t.favoriteNewsUpdateRequired
-              : (isFavoritesFeed ? t.favoriteNewsLoadError : t.newsLoadError)}
-          </p>
-          <button onClick={retry} type="button">{t.retry}</button>
-        </div>
-      )}
-
-      {!identityRequired && !result.loading && !result.error && result.items.length === 0 && (
-        <div className="home-empty-state">
-          {isFavoritesFeed ? t.favoriteNewsEmpty : t.newsCategoryEmpty}
-        </div>
-      )}
-
-      {!identityRequired && !result.loading && !result.error && result.items.length > 0 && (
-        <div className="structured-news-list">
-          {result.items.map((item) => (
-            <NewsCard
-              categoryLabel={t[`newsCategory${item.category?.charAt(0).toUpperCase()}${item.category?.slice(1)}`] || ""}
-              competitionLabels={trustedCompetitionLabels(item, lang)}
-              item={item}
-              key={item.id}
-              lang={lang}
-            />
-          ))}
-        </div>
-      )}
-    </section>
-  );
+export default function NewsPage({ lang, t, telegramId, favoriteTeams = [] }) {
+  const [category, setCategory] = useState("all");
+  const [selectedTeam, setSelectedTeam] = useState("");
+  const favoritesRevision = favoriteNewsRevision(favoriteTeams);
+  const options = [...new Map(favoriteTeams.filter((team) => team.competition_key && team.team_id != null)
+    .map((team) => [JSON.stringify([team.competition_key, String(team.team_id)]), team])).entries()]
+    .filter(([, team]) => favoriteDisplayName(team, lang));
+  const activeTeam = options.some(([key]) => key === selectedTeam) ? selectedTeam : "";
+  const [competitionKey, teamId] = activeTeam ? JSON.parse(activeTeam) : [];
+  const identityRequired = category === "favorites" && !/^[1-9]\d*$/.test(String(telegramId || ""));
+  // Favorite identity changes invalidate personal feeds, including same-ID teams in other competitions.
+  const scope = JSON.stringify([category, competitionKey, teamId, telegramId,
+    category === "favorites" || activeTeam ? favoritesRevision : ""]);
+  return <section className="structured-news-page" dir={lang === "fa" ? "rtl" : "ltr"}>
+    <h1>{t.newsPage}</h1>
+    <div className="structured-news-categories" aria-label={t.newsCategories}>
+      {CATEGORIES.map((key) => <button key={key} type="button" aria-pressed={category === key}
+        className={category === key ? "active" : ""} onClick={() => setCategory(key)}>{t[labelKey(key)]}</button>)}
+    </div>
+    {options.length > 0 && <label className="news-team-filter">{t.newsTeamFilter}
+      <select value={activeTeam} onChange={(event) => setSelectedTeam(event.target.value)}>
+        <option value="">{t.newsAllTeams}</option>
+        {options.map(([key, team]) => <option value={key} key={key}>
+          {favoriteDisplayName(team, lang)}{favoriteCompetitionName(team, lang) ? ` — ${favoriteCompetitionName(team, lang)}` : ""}
+        </option>)}
+      </select>
+    </label>}
+    {identityRequired ? <div className="home-empty-state">{t.favoriteNewsIdentityRequired}</div>
+      : <NewsFeed key={scope} category={category} competitionKey={competitionKey} teamId={teamId}
+        telegramId={telegramId} lang={lang} t={t} />}
+  </section>;
 }

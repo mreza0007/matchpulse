@@ -99,6 +99,7 @@ def read_articles(sources, *, category=None, competition_key=None, team_id=None,
             teams = [dict(team) for team in conn.execute(
                 "SELECT competition_key,team_id FROM news_article_teams WHERE article_id=? ORDER BY competition_key,team_id", (item["id"],))]
             item.update(origin="publisher", source=source.name, original_headline=item["headline"],
+                        image_permitted=bool(source.image_approved),
                         title_fa=item["headline"] if item["language"] == "fa" else "",
                         title_en=item["headline"] if item["language"] != "fa" else "",
                         tags=[], related_teams=teams, related_team_ids=[team["team_id"] for team in teams],

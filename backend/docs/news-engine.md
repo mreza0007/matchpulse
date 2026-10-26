@@ -68,9 +68,33 @@ No translation is fabricated. Approved original headlines populate their languag
 
 ## Phase 2
 
+The article UI now supports attribution, original HTTPS links (Telegram openLink
+with native-anchor fallback), publication dates, explicit older-article labels,
+permitted images, bilingual existing headlines, categories and 20-item load-more.
+The national category is retained for backward compatibility. A favorite-team
+selector sends exact competition/team tuples; My Teams uses the favorites API.
+Favorite identity changes remount personal feeds, aborting obsolete requests.
+Failed refreshes retain loaded articles with an explicit warning and retry.
+Offset pagination remains subject to shifts during concurrent ingestion; IDs
+are deduplicated when appending pages. No content is automatically translated.
+
+`image_permitted` is additive response metadata evaluated from current source
+approval. The frontend requires literal true plus a safe HTTPS image URL; an old
+backend without that field safely renders text-only cards. No schema change.
+
+Fixture verification (no publishers or application database involved), frontend:
+
+    node --test test/newsExperience.test.js test/newsRendering.test.js
+    node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5179 --strictPort
+    node test/newsBrowser.mjs
+
+The optional browser check uses installed Windows Chrome with a disposable
+profile and verifies 320/375/390px RTL/LTR fixture interactions. The fixture route
+is development-only and is not imported by the production entrypoint. Real iOS
+Telegram WebView and Android Telegram should still receive manual device QA.
+
 Secure actual commercial metadata licences; source-specific adapters/fixtures and
-reviewed team mappings; frontend original-language headlines, attribution, links,
-timestamps and pagination; operational monitoring/retention and editorial policy.
+reviewed team mappings; operational monitoring/retention and editorial policy.
 News notification preferences, explicit opt-in, importance review, per-user limits,
 deduplication/outbox and startup stale-news suppression require a separate phase.
 Do not reuse live-match send paths to broadcast news. No news preferences or

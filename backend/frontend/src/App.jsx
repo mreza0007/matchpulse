@@ -1117,7 +1117,7 @@ function App() {
         />
       )}
 
-      {activeTab === "news" && <NewsPage lang={lang} t={t} telegramId={telegramId} />}
+      {activeTab === "news" && <NewsPage lang={lang} t={t} telegramId={telegramId} favoriteTeams={favoriteTeams} />}
 
       {activeTab === "predictions" && (
         <PredictionsPage lang={lang} t={t} telegramId={telegramId} />

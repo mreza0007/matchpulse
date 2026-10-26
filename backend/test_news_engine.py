@@ -172,10 +172,40 @@ class NewsEngineTests(unittest.TestCase):
         body = self.body.replace(b"</item>", b'<enclosure type="image/png" url="https://news.example.invalid/pic.png"/></item>')
         self.ingest(config, body)
         approved = read_articles({"fixture": config}, path=self.path)[0]
+        self.assertIs(approved["image_permitted"], True)
         self.assertEqual(approved["summary"], "Permitted fixture summary")
         self.assertTrue(approved["image_url"].endswith("pic.png"))
         self.assertIsNone(self.rows()[0]["summary"])
         self.assertIsNone(self.rows()[0]["image_url"])
+        self.assertIs(self.rows()[0]["image_permitted"], False)
+
+    def test_api_favorite_news_is_scoped_and_refreshes_after_membership_changes(self):
+        import db_service
+        import main
+        from fastapi.testclient import TestClient
+        self.ingest()
+        with patch.object(db_service, "DB_PATH", self.path), patch("news_sources.NEWS_SOURCES", (self.source,)), patch.object(
+                main, "get_favorite_team_identities_v2_from_db") as identities:
+            client = TestClient(main.api)
+            identities.return_value = [{"competition_key": "la_liga", "team_id": "mp_team_test"}]
+            self.assertEqual(client.get("/news/favorites/10").json()["count"], 0)
+            identities.return_value = [{"competition_key": "premier_league", "team_id": "mp_team_test"}]
+            payload = client.get("/news/favorites/10?limit=1").json()
+            self.assertEqual(payload["count"], 1)
+            self.assertEqual(payload["news"][0]["source"], self.source.name)
+            self.assertEqual(payload["news"][0]["original_url"], "https://news.example.invalid/articles/one?utm_source=test")
+            self.assertEqual(client.get("/news/favorites/10?limit=1&offset=1").json()["count"], 0)
+            identities.return_value = []
+            self.assertEqual(client.get("/news/favorites/10").json()["count"], 0)
+
+    def test_equal_publication_dates_have_stable_nonoverlapping_pages(self):
+        for index in range(3):
+            self.ingest(body=self.body.replace(b"fixture-1", f"fixture-{index}".encode()).replace(
+                b"articles/one", f"articles/{index}".encode()), now=NOW + timedelta(hours=index))
+        all_ids = [row["id"] for row in self.rows()]
+        self.assertEqual(all_ids, sorted(all_ids))
+        pages = [self.rows(limit=1, offset=index)[0]["id"] for index in range(3)]
+        self.assertEqual(pages, all_ids)
 
     def test_unknown_team_not_guessed_and_mapping_review_required(self):
         with self.assertRaises(ValueError):
